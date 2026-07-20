@@ -36,7 +36,7 @@ function applyFilters(){
     if(state.strokeFilter && k.strokeCount !== state.strokeFilter) return false;
     if(state.radicalFilter && k.radical !== state.radicalFilter) return false;
     if(state.jlptFilter && k.jlpt !== state.jlptFilter) return false;
-    if(state.gradeFilter && k.grade !== state.gradeFilter) return false;
+    if(state.gradeFilter !== null && gradeBucket(k.grade) !== state.gradeFilter) return false;
     if(!q) return true;
     const compoundHay = (k.compounds||[]).map(c => c.word+' '+c.reading+' '+c.meaning_en).join(' ');
     const hay = [k.kanji, ...k.on, ...k.kun, ...k.meanings_en, k.radical, k.radical_meaning_en, k.jlpt, compoundHay].join(" ").toLowerCase();
@@ -112,9 +112,20 @@ function renderRadicalChips(){
   });
 }
 
+function gradeBucket(g){
+  if(g >= 1 && g <= 6) return g;
+  if(g === 8) return 8;
+  return 99; // covers grade 9, 10 (jinmeiyou), and ungraded JIS X0208 kanji -> shown as 高校
+}
+function gradeLabel(g){
+  const b = gradeBucket(g);
+  if(b === 8) return '中学';
+  if(b === 99) return '高校';
+  return '小' + b;
+}
+
 function renderGradeChips(){
-  const gradeSortVal = g => g===8 ? 7 : (g==null ? 8 : g);
-  const grades = Array.from(new Set(KANJI_DATA.map(k=>k.grade))).sort((a,b)=>gradeSortVal(a)-gradeSortVal(b));
+  const grades = Array.from(new Set(KANJI_DATA.map(k=>gradeBucket(k.grade)))).sort((a,b)=>a-b);
   const wrap = document.getElementById('kjGradeChips');
   grades.forEach(g => {
     const chip = document.createElement('span');
@@ -122,7 +133,7 @@ function renderGradeChips(){
     chip.addEventListener('click', () => {
       state.gradeFilter = (state.gradeFilter === g) ? null : g;
       document.querySelectorAll('#kjGradeChips .chip').forEach(el=>el.classList.remove('on'));
-      if(state.gradeFilter) chip.classList.add('on');
+      if(state.gradeFilter !== null) chip.classList.add('on');
       applyFilters();
     });
     wrap.appendChild(chip);
@@ -155,6 +166,22 @@ document.getElementById('kjClearFilters').addEventListener('click', () => {
   applyFilters();
 });
 
+document.getElementById('kjHomeLink').addEventListener('click', () => {
+  state.strokeFilter=null; state.radicalFilter=null; state.jlptFilter=null; state.gradeFilter=null; state.query=""; state.favoritesOnly=false;
+  document.getElementById('kjSearchInput').value="";
+  document.getElementById('kjRadicalSelect').value="";
+  document.querySelectorAll('.chip').forEach(el=>el.classList.remove('on'));
+  document.getElementById('kjFavToggle').classList.remove('active');
+  updateFavToggleLabel();
+  document.getElementById('kjHwPanel').classList.remove('show');
+  document.getElementById('kjJukugoPanel').classList.remove('show');
+  jukugoReset();
+  if(document.getElementById('kjFullscreen').classList.contains('show')) closeFullscreen();
+  closeModal();
+  applyFilters();
+  window.scrollTo({top:0, behavior:'smooth'});
+});
+
 document.getElementById('kjFavToggle').addEventListener('click', () => {
   state.favoritesOnly = !state.favoritesOnly;
   document.getElementById('kjFavToggle').classList.toggle('active', state.favoritesOnly);
@@ -171,11 +198,6 @@ document.getElementById('kjStudyModeToggle').addEventListener('click', () => {
 let currentAnimSpeed = 700;
 let currentModalKanji = null;
 let modalHistory = [];
-function gradeLabel(g){
-  if(g === 8) return '中学';
-  if(g === null || g === undefined) return '高校';
-  return '小' + g;
-}
 
 function renderCompoundsList(container, k){
   container.innerHTML = '';
@@ -426,7 +448,8 @@ function renderFsWordList(){
   words.forEach(w => {
     const chip = document.createElement('div');
     chip.className = 'kj-fs-word-chip' + (fsSelectedWord === w ? ' selected' : '');
-    chip.innerHTML = `${w.word}<span class="tag">${w.type === 'kun' ? '訓読み' : '熟語'}</span>`;
+    const cardLabel = fsMode === 'writing' ? w.reading : w.word;
+    chip.innerHTML = `${cardLabel}<span class="tag">${w.type === 'kun' ? '訓読み' : '熟語'}</span>`;
     chip.addEventListener('click', () => {
       fsSelectedWord = w;
       fsRevealed = false;
