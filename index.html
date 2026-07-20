@@ -81,6 +81,7 @@
   .kj-modal .star-btn:hover{ transform:scale(1.15); }
   .kj-modal .star-btn.active{ color:#F2B705; }
   #kjFavToggle.active{ background:#F2B705; border-color:#F2B705; color:#fff; }
+  #kjStudyModeToggle.active{ background:var(--indigo); border-color:var(--indigo); color:#fff; }
   .kj-modal .back{ position:absolute; top:14px; left:26px; border:1px solid var(--hairline); background:var(--paper-card); cursor:pointer; font-size:11.5px; color:var(--ink-soft); padding:6px 10px; font-family:'Zen Kaku Gothic New', sans-serif; }
   .kj-modal .back:hover{ border-color:var(--ink); color:var(--ink); }
   .kj-modal-top{ display:flex; gap:22px; flex-wrap:wrap; align-items:flex-start; margin-bottom:16px; }
@@ -209,7 +210,91 @@
     .kj-hw-canvas-wrap{ width:100%; max-width:320px; height:auto; aspect-ratio:1/1; margin:0 auto; }
     .kj-jk-canvas-wrap{ width:100%; max-width:320px; height:auto; aspect-ratio:1/1; margin:0 auto; }
   }
-  @media (prefers-reduced-motion: reduce){ * { transition:none !important; } }
+  @media (prefers-reduced-motion: reduce){ * { transition:none !important; } }  /* ================= Fullscreen Lesson Mode ================= */
+  .kj-fs{
+    display:none; position:fixed; inset:0; z-index:200;
+    background:var(--paper);
+    flex-direction:column;
+  }
+  .kj-fs.show{ display:flex; }
+  .kj-fs-topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:14px 22px; border-bottom:2px solid var(--ink); flex:none; flex-wrap:wrap; gap:10px;
+  }
+  .kj-fs-modeswitch{ display:flex; gap:8px; flex-wrap:wrap; }
+  .kj-fs-modebtn{
+    border:1.5px solid var(--ink); background:var(--paper-card); color:var(--ink);
+    font-family:'Zen Kaku Gothic New', sans-serif; font-size:14px; font-weight:700;
+    padding:9px 16px; cursor:pointer;
+  }
+  .kj-fs-modebtn.active{ background:var(--indigo); border-color:var(--indigo); color:#fff; }
+  .kj-fs-close{
+    border:1.5px solid var(--ink); background:transparent; color:var(--ink); cursor:pointer;
+    font-family:'Zen Kaku Gothic New', sans-serif; font-size:13px; padding:9px 16px;
+  }
+  .kj-fs-close:hover{ background:var(--ink); color:var(--paper); }
+
+  .kj-fs-normal{
+    flex:1; display:flex; gap:32px; padding:28px 40px; overflow-y:auto; align-items:flex-start; flex-wrap:wrap; justify-content:center;
+  }
+  .kj-fs-glyph-col{ display:flex; flex-direction:column; align-items:center; gap:16px; flex:none; }
+  .kj-fs-stage{
+    width:min(46vw, 46vh, 480px); height:min(46vw, 46vh, 480px);
+    border:2px solid var(--ink);
+    background:linear-gradient(var(--grid-line-soft) 1px, transparent 1px) 0 0/100% 50%, linear-gradient(90deg, var(--grid-line-soft) 1px, transparent 1px) 0 0/50% 100%;
+    background-color:var(--paper-card);
+  }
+  .kj-fs-stage svg{ width:100%; height:100%; }
+  .kj-fs-stage .kanji-glyph path{ stroke-width:2.6; }
+  .kj-fs-controls{ display:flex; gap:10px; flex-wrap:wrap; justify-content:center; }
+  .kj-fs-btn{
+    height:44px; padding:0 18px; background:var(--ink); color:var(--paper); border:1.5px solid var(--ink);
+    font-family:'Zen Kaku Gothic New', sans-serif; font-size:14px; font-weight:700; cursor:pointer;
+  }
+  .kj-fs-btn:hover{ background:var(--vermillion); border-color:var(--vermillion); }
+  .kj-fs-btn.ghost{ background:transparent; color:var(--ink); }
+  .kj-fs-btn.ghost:hover{ background:var(--ink); color:var(--paper); }
+  .kj-fs-btn.copied{ background:var(--green); border-color:var(--green); color:#fff; }
+  .kj-fs-btn.active{ color:#F2B705; border-color:#F2B705; }
+
+  .kj-fs-info{ flex:1 1 420px; min-width:320px; max-width:640px; }
+  .kj-fs-toprow{ display:flex; align-items:center; gap:14px; margin-bottom:16px; flex-wrap:wrap; }
+  .kj-fs-kanji-small{ font-family:'Shippori Mincho', serif; font-size:22px; color:var(--ink-soft); }
+  .kj-fs-jlpt{ font-size:14px; color:#fff; background:var(--indigo); padding:4px 12px; }
+  .kj-fs-row{ margin-bottom:14px; font-size:19px; line-height:1.6; }
+  .kj-fs-row .k{ font-size:12px; color:var(--vermillion); letter-spacing:0.1em; font-weight:700; display:block; margin-bottom:4px; }
+  .kj-fs-example{ background:var(--paper-card); border-left:4px solid var(--vermillion); padding:16px 18px; margin:18px 0; font-size:18px; line-height:1.8; }
+  .kj-fs-example .en{ font-size:15px; color:var(--ink-soft); margin-top:4px; }
+  .kj-fs-compounds .k{ font-size:12px; color:var(--vermillion); letter-spacing:0.1em; font-weight:700; display:block; margin-bottom:8px; }
+  .kj-fs-compounds .list{ display:flex; flex-direction:column; gap:0; border-top:1px solid var(--hairline); }
+  .kj-fs-compounds .kj-compound-item{ display:flex; align-items:baseline; gap:14px; padding:10px 2px; border-bottom:1px solid var(--hairline); font-size:16px; }
+  .kj-fs-compounds .kj-compound-item .word{ font-family:'Shippori Mincho', serif; font-size:22px; flex:none; min-width:70px; }
+  .kj-fs-compounds .kj-compound-item .word .wc.link{ color:var(--vermillion); cursor:pointer; }
+  .kj-fs-compounds .kj-compound-item .word .wc.link:hover{ text-decoration:underline; }
+  .kj-fs-compounds .kj-compound-item .reading{ font-size:13px; color:var(--ink-faint); flex:none; min-width:80px; }
+  .kj-fs-compounds .kj-compound-item .gloss{ font-size:14px; color:var(--ink-soft); }
+  .kj-fs-compounds .none{ font-size:14px; color:var(--ink-faint); padding:6px 2px; }
+
+  .kj-fs-study{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:24px; padding:20px; overflow:hidden; }
+  .kj-fs-stage2{ display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; min-height:40vh; cursor:pointer; user-select:none; }
+  .kj-fs-stage2 .back{ font-family:'Zen Kaku Gothic New', sans-serif; color:var(--vermillion); min-height:1.4em; }
+  .kj-fs-stage2 .front{ font-family:'Shippori Mincho', serif; color:var(--ink); }
+  .kj-fs-word-meaning{ font-size:20px; color:var(--ink-soft); text-align:center; min-height:1.5em; }
+  .kj-fs-wordlist{ flex:none; width:100%; max-width:1000px; display:flex; flex-wrap:wrap; gap:10px; justify-content:center; max-height:22vh; overflow-y:auto; padding:6px; }
+  .kj-fs-word-chip{
+    border:1.5px solid var(--hairline); background:var(--paper-card); color:var(--ink);
+    font-family:'Shippori Mincho', serif; font-size:20px; padding:8px 16px; cursor:pointer;
+  }
+  .kj-fs-word-chip:hover{ border-color:var(--vermillion); }
+  .kj-fs-word-chip.selected{ border-color:var(--vermillion); background:#FBF0EC; }
+  .kj-fs-word-chip .tag{ font-family:'Zen Kaku Gothic New', sans-serif; font-size:9px; color:var(--ink-faint); display:block; margin-top:2px; }
+  .kj-fs-empty{ color:var(--ink-faint); font-size:15px; text-align:center; padding:20px; }
+
+  @media (max-width:800px){
+    .kj-fs-normal{ padding:18px; gap:20px; }
+    .kj-fs-stage{ width:min(80vw,80vh,340px); height:min(80vw,80vh,340px); }
+    .kj-fs-row{ font-size:16px; }
+  }
 </style>
 </head>
 <body>
@@ -232,6 +317,7 @@
       <button class="kj-btn ghost" id="kjHwToggle">✎ 手書きで探す</button>
       <button class="kj-btn ghost" id="kjJukugoToggle">🔤 熟語で調べる</button>
       <button class="kj-btn ghost" id="kjFavToggle">☆ お気に入り</button>
+      <button class="kj-btn ghost" id="kjStudyModeToggle">🖥 学習モード</button>
     </div>
 
     <div class="kj-hw-panel" id="kjHwPanel">
@@ -344,6 +430,53 @@
       <span class="k">この漢字を使った熟語</span>
       <div class="list" id="kjModalCompounds"></div>
     </div>
+  </div>
+</div>
+
+<div class="kj-fs" id="kjFullscreen">
+  <div class="kj-fs-topbar">
+    <div class="kj-fs-modeswitch">
+      <button class="kj-fs-modebtn active" data-mode="normal">通常表示</button>
+      <button class="kj-fs-modebtn" data-mode="reading">① 読み方学習</button>
+      <button class="kj-fs-modebtn" data-mode="writing">② 書き方学習</button>
+    </div>
+    <button class="kj-fs-close" id="kjFsClose">✕ 閉じる（Esc）</button>
+  </div>
+
+  <div class="kj-fs-normal" id="kjFsNormal">
+    <div class="kj-fs-glyph-col">
+      <div class="kj-fs-stage" id="kjFsStage"></div>
+      <div class="kj-fs-controls">
+        <button class="kj-fs-btn" id="kjFsReplay">▶ 書き順をもう一度</button>
+        <button class="kj-fs-btn ghost" id="kjFsSlow">ゆっくり再生</button>
+        <button class="kj-fs-btn ghost" id="kjFsCopy">⧉ 漢字をコピー</button>
+        <button class="kj-fs-btn ghost" id="kjFsStar">☆</button>
+      </div>
+    </div>
+    <div class="kj-fs-info">
+      <div class="kj-fs-toprow">
+        <div class="kj-fs-kanji-small" id="kjFsKanjiSmall"></div>
+        <div class="kj-fs-jlpt" id="kjFsJlpt"></div>
+      </div>
+      <div class="kj-fs-row"><span class="k">音読み</span><span class="v" id="kjFsOn"></span></div>
+      <div class="kj-fs-row"><span class="k">訓読み</span><span class="v" id="kjFsKun"></span></div>
+      <div class="kj-fs-row"><span class="k">意味（英語）</span><span class="v" id="kjFsMeaning"></span></div>
+      <div class="kj-fs-row"><span class="k">画数／部首／学年</span><span class="v" id="kjFsStrokeRadical"></span></div>
+      <div class="kj-fs-example" id="kjFsExample"></div>
+      <div class="kj-fs-compounds">
+        <span class="k">この漢字を使った言葉</span>
+        <div class="list" id="kjFsCompoundsList"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="kj-fs-study" id="kjFsStudyView" style="display:none;">
+    <div class="kj-fs-stage2" id="kjFsStage2">
+      <div class="back" id="kjFsBack"></div>
+      <div class="front" id="kjFsFront">言葉を選んでください</div>
+    </div>
+    <div class="kj-fs-word-meaning" id="kjFsWordMeaning"></div>
+    <div class="kj-fs-wordlist" id="kjFsWordList"></div>
   </div>
 </div>
 
