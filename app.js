@@ -2,6 +2,7 @@
 let KANJI_DATA = [];
 let kanjiMap = new Map(); // kanji character -> its data entry, for cross-linking compounds
 const state = { query:"", strokeFilter:null, radicalFilter:null, jlptFilter:null, gradeFilter:null, favoritesOnly:false, filtered:[] };
+let studyModeActive = false;
 
 /* ---- Favorites (stored in the browser, no account needed) ---- */
 const FAV_KEY = 'hitsujun-favorites';
@@ -112,8 +113,8 @@ function renderRadicalChips(){
 }
 
 function renderGradeChips(){
-  const gradeLabel = g => g===8 ? '中学' : g ? ('小'+g) : '？';
-  const grades = Array.from(new Set(KANJI_DATA.map(k=>k.grade))).sort((a,b)=>a-b);
+  const gradeSortVal = g => g===8 ? 7 : (g==null ? 8 : g);
+  const grades = Array.from(new Set(KANJI_DATA.map(k=>k.grade))).sort((a,b)=>gradeSortVal(a)-gradeSortVal(b));
   const wrap = document.getElementById('kjGradeChips');
   grades.forEach(g => {
     const chip = document.createElement('span');
@@ -161,14 +162,59 @@ document.getElementById('kjFavToggle').addEventListener('click', () => {
   applyFilters();
 });
 
+document.getElementById('kjStudyModeToggle').addEventListener('click', () => {
+  studyModeActive = !studyModeActive;
+  document.getElementById('kjStudyModeToggle').classList.toggle('active', studyModeActive);
+});
+
 /* ================= Modal + stroke order animation ================= */
 let currentAnimSpeed = 700;
 let currentModalKanji = null;
 let modalHistory = [];
-function gradeLabel(g){ return g===8 ? '中学校' : g ? ('小学'+g+'年') : '－'; }
+function gradeLabel(g){
+  if(g === 8) return '中学';
+  if(g === null || g === undefined) return '高校';
+  return '小' + g;
+}
+
+function renderCompoundsList(container, k){
+  container.innerHTML = '';
+  if(!k.compounds || k.compounds.length === 0){
+    container.innerHTML = '<div class="none">この漢字が使われる一般的な熟語は見つかりませんでした（単独で使われることが多い漢字です）。</div>';
+    return;
+  }
+  k.compounds.forEach(c => {
+    const row = document.createElement('div');
+    row.className = 'kj-compound-item';
+    const wordHtml = Array.from(c.word).map(ch => {
+      if(ch === k.kanji) return `<span class="wc current">${ch}</span>`;
+      if(kanjiMap.has(ch)) return `<span class="wc link" data-kanji="${ch}">${ch}</span>`;
+      return `<span class="wc">${ch}</span>`;
+    }).join('');
+    row.innerHTML = `<span class="word">${wordHtml}</span><span class="reading">${c.reading}</span><span class="gloss">${c.meaning_en}</span>`;
+    container.appendChild(row);
+  });
+}
+
+function buildStrokeSvg(container, strokes){
+  container.querySelectorAll('svg').forEach(el=>el.remove());
+  const svgNS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('viewBox', '0 0 109 109');
+  svg.classList.add('kanji-glyph');
+  const g = document.createElementNS(svgNS, 'g');
+  const pathEls = [];
+  strokes.forEach(d => { const p = document.createElementNS(svgNS,'path'); p.setAttribute('d', d); g.appendChild(p); pathEls.push(p); });
+  svg.appendChild(g); container.appendChild(svg);
+  return pathEls;
+}
 
 function openModal(k, opts){
   opts = opts || {};
+  if(studyModeActive){
+    openFullscreen(k);
+    return;
+  }
   if(!opts.fromHistory){
     // starting a fresh lookup (from the grid, search, or handwriting results) resets the trail
     modalHistory = [];
@@ -189,34 +235,10 @@ function openModal(k, opts){
   document.getElementById('kjModalExJa').textContent = k.ex_ja;
   document.getElementById('kjModalExEn').textContent = k.ex_en;
 
-  const compoundsBox = document.getElementById('kjModalCompounds');
-  compoundsBox.innerHTML = '';
-  if(!k.compounds || k.compounds.length === 0){
-    compoundsBox.innerHTML = '<div class="none">この漢字が使われる一般的な熟語は見つかりませんでした（単独で使われることが多い漢字です）。</div>';
-  } else {
-    k.compounds.forEach(c => {
-      const row = document.createElement('div');
-      row.className = 'kj-compound-item';
-      const wordHtml = Array.from(c.word).map(ch => {
-        if(ch === k.kanji) return `<span class="wc current">${ch}</span>`;
-        if(kanjiMap.has(ch)) return `<span class="wc link" data-kanji="${ch}">${ch}</span>`;
-        return `<span class="wc">${ch}</span>`;
-      }).join('');
-      row.innerHTML = `<span class="word">${wordHtml}</span><span class="reading">${c.reading}</span><span class="gloss">${c.meaning_en}</span>`;
-      compoundsBox.appendChild(row);
-    });
-  }
+  renderCompoundsList(document.getElementById('kjModalCompounds'), k);
 
   const stage = document.getElementById('kjStage');
-  stage.querySelectorAll('svg').forEach(el=>el.remove());
-  const svgNS = "http://www.w3.org/2000/svg";
-  const svg = document.createElementNS(svgNS, 'svg');
-  svg.setAttribute('viewBox', '0 0 109 109');
-  svg.classList.add('kanji-glyph');
-  const g = document.createElementNS(svgNS, 'g');
-  const pathEls = [];
-  k.strokes.forEach(d => { const p = document.createElementNS(svgNS,'path'); p.setAttribute('d', d); g.appendChild(p); pathEls.push(p); });
-  svg.appendChild(g); stage.appendChild(svg);
+  const pathEls = buildStrokeSvg(stage, k.strokes);
 
   currentAnimSpeed = 700;
   playAnimation(pathEls);
@@ -301,7 +323,157 @@ document.getElementById('kjModalBack').addEventListener('click', () => {
   if(prev) openModal(prev, {fromHistory:true});
 });
 function closeModal(){ document.getElementById('kjOverlay').classList.remove('show'); }
-document.addEventListener('keydown', e => { if(e.key === 'Escape') closeModal(); });
+document.addEventListener('keydown', e => {
+  if(e.key !== 'Escape') return;
+  if(document.getElementById('kjFullscreen').classList.contains('show')) closeFullscreen();
+  else closeModal();
+});
+
+/* ================= Fullscreen Lesson Mode ================= */
+let fsCurrentKanji = null;
+let fsMode = 'normal'; // 'normal' | 'reading' | 'writing'
+let fsSelectedWord = null;
+let fsRevealed = false;
+
+function openFullscreen(k){
+  fsCurrentKanji = k;
+  fsMode = 'normal';
+  fsSelectedWord = null;
+  fsRevealed = false;
+  document.querySelectorAll('.kj-fs-modebtn').forEach(b => b.classList.toggle('active', b.dataset.mode === 'normal'));
+  document.getElementById('kjFsNormal').style.display = 'flex';
+  document.getElementById('kjFsStudyView').style.display = 'none';
+  renderFsNormal(k);
+  document.body.style.overflow = 'hidden';
+  document.getElementById('kjFullscreen').classList.add('show');
+}
+
+function closeFullscreen(){
+  document.getElementById('kjFullscreen').classList.remove('show');
+  document.body.style.overflow = '';
+}
+
+document.getElementById('kjFsClose').addEventListener('click', closeFullscreen);
+
+function renderFsNormal(k){
+  document.getElementById('kjFsKanjiSmall').textContent = k.kanji + '　部首：' + k.radical + '（' + k.radical_meaning_en + '）';
+  document.getElementById('kjFsJlpt').textContent = k.jlpt;
+  document.getElementById('kjFsOn').textContent = k.on.length ? k.on.join('、') : '－';
+  document.getElementById('kjFsKun').textContent = k.kun.length ? k.kun.join('、') : '－';
+  document.getElementById('kjFsMeaning').textContent = k.meanings_en.join(', ');
+  document.getElementById('kjFsStrokeRadical').textContent = k.strokeCount + '画　／　部首：' + k.radical + '（' + k.radical_meaning_en + '）　／　' + gradeLabel(k.grade);
+
+  const exBox = document.getElementById('kjFsExample');
+  if(k.ex_ja){
+    exBox.style.display = '';
+    exBox.innerHTML = `<div>${k.ex_ja}</div><div class="en">${k.ex_en}</div>`;
+  } else {
+    exBox.style.display = 'none';
+  }
+
+  renderCompoundsList(document.getElementById('kjFsCompoundsList'), k);
+
+  const pathEls = buildStrokeSvg(document.getElementById('kjFsStage'), k.strokes);
+  currentAnimSpeed = 700;
+  playAnimation(pathEls);
+  document.getElementById('kjFsReplay').onclick = () => playAnimation(pathEls);
+  document.getElementById('kjFsSlow').onclick = () => { currentAnimSpeed = 1400; playAnimation(pathEls); };
+  document.getElementById('kjFsCopy').onclick = () => copyTextToClipboard(k.kanji, document.getElementById('kjFsCopy'));
+
+  const starBtn = document.getElementById('kjFsStar');
+  const setFsStarUI = () => {
+    const isFav = favorites.has(k.kanji);
+    starBtn.textContent = isFav ? '★' : '☆';
+    starBtn.classList.toggle('active', isFav);
+  };
+  setFsStarUI();
+  starBtn.onclick = () => { toggleFavorite(k.kanji); setFsStarUI(); };
+}
+
+document.getElementById('kjFsCompoundsList').addEventListener('click', e => {
+  const el = e.target.closest('.wc.link');
+  if(!el) return;
+  const entry = kanjiMap.get(el.dataset.kanji);
+  if(entry) openFullscreen(entry);
+});
+
+document.querySelectorAll('.kj-fs-modebtn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    fsMode = btn.dataset.mode;
+    document.querySelectorAll('.kj-fs-modebtn').forEach(b => b.classList.toggle('active', b === btn));
+    if(fsMode === 'normal'){
+      document.getElementById('kjFsNormal').style.display = 'flex';
+      document.getElementById('kjFsStudyView').style.display = 'none';
+    } else {
+      document.getElementById('kjFsNormal').style.display = 'none';
+      document.getElementById('kjFsStudyView').style.display = 'flex';
+      fsSelectedWord = null;
+      fsRevealed = false;
+      renderFsWordList();
+      renderFsStage();
+    }
+  });
+});
+
+function renderFsWordList(){
+  const box = document.getElementById('kjFsWordList');
+  box.innerHTML = '';
+  const words = (fsCurrentKanji && fsCurrentKanji.study_words) || [];
+  if(words.length === 0){
+    box.innerHTML = '<div class="kj-fs-empty">この漢字には学習用の言葉が見つかりませんでした。</div>';
+    return;
+  }
+  words.forEach(w => {
+    const chip = document.createElement('div');
+    chip.className = 'kj-fs-word-chip' + (fsSelectedWord === w ? ' selected' : '');
+    chip.innerHTML = `${w.word}<span class="tag">${w.type === 'kun' ? '訓読み' : '熟語'}</span>`;
+    chip.addEventListener('click', () => {
+      fsSelectedWord = w;
+      fsRevealed = false;
+      renderFsWordList();
+      renderFsStage();
+    });
+    box.appendChild(chip);
+  });
+}
+
+function renderFsStage(){
+  const back = document.getElementById('kjFsBack');
+  const front = document.getElementById('kjFsFront');
+  const meaning = document.getElementById('kjFsWordMeaning');
+  const stage = document.getElementById('kjFsStage2');
+
+  if(!fsSelectedWord){
+    front.textContent = '言葉を選んでください';
+    front.style.fontSize = '48px';
+    back.textContent = '';
+    meaning.textContent = '';
+    stage.onclick = null;
+    return;
+  }
+
+  const w = fsSelectedWord;
+  meaning.textContent = w.meaning_en;
+
+  if(fsMode === 'reading'){
+    // kanji word always shown big; reading revealed on click, above, at ~1/4 size
+    front.textContent = w.word;
+    front.style.fontSize = 'min(18vw, 22vh, 200px)';
+    back.style.fontSize = 'min(4.5vw, 5.5vh, 50px)';
+    back.textContent = fsRevealed ? w.reading : '';
+  } else {
+    // writing mode: reading always shown; kanji revealed on click, above, prominently
+    front.textContent = w.reading;
+    front.style.fontSize = 'min(11vw, 13vh, 110px)';
+    back.style.fontSize = 'min(18vw, 22vh, 200px)';
+    back.textContent = fsRevealed ? w.word : '';
+  }
+
+  stage.onclick = () => {
+    fsRevealed = !fsRevealed;
+    renderFsStage();
+  };
+}
 
 /* ================= Handwriting recognition ================================
    Uses "DaKanji Single Kanji Recognition" (CaptainDario, MIT license): a CNN
