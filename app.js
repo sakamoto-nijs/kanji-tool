@@ -281,15 +281,27 @@ function openModal(k, opts){
   document.getElementById('kjOverlay').classList.add('show');
 }
 function playAnimation(pathEls){
-  pathEls.forEach((p, i) => {
+  // 1) Instantly hide every stroke (no transition yet).
+  pathEls.forEach(p => {
     const len = p.getTotalLength();
     p.style.transition = 'none';
     p.style.strokeDasharray = len;
     p.style.strokeDashoffset = len;
-    p.getBoundingClientRect();
-    p.style.transition = `stroke-dashoffset ${currentAnimSpeed}ms ease-in-out`;
-    p.style.transitionDelay = (i * currentAnimSpeed) + 'ms';
-    requestAnimationFrame(() => { p.style.strokeDashoffset = 0; });
+  });
+  // 2) Wait two animation frames before starting the transition. A single
+  //    rAF (or getBoundingClientRect) isn't always enough to guarantee the
+  //    browser has actually painted the "hidden" state first — this matters
+  //    most the very first time a freshly-inserted SVG is animated, which is
+  //    why the first 1-2 strokes could appear to skip their draw-in. Two
+  //    rAFs reliably wait for a real paint before flipping the transition on.
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      pathEls.forEach((p, i) => {
+        p.style.transition = `stroke-dashoffset ${currentAnimSpeed}ms ease-in-out`;
+        p.style.transitionDelay = (i * currentAnimSpeed) + 'ms';
+        p.style.strokeDashoffset = 0;
+      });
+    });
   });
 }
 
@@ -460,6 +472,9 @@ function renderFsWordList(){
   });
 }
 
+const FONT_KANJI = "'Shippori Mincho', serif";
+const FONT_KANA = "'Zen Kaku Gothic New', sans-serif";
+
 function renderFsStage(){
   const back = document.getElementById('kjFsBack');
   const front = document.getElementById('kjFsFront');
@@ -468,6 +483,7 @@ function renderFsStage(){
 
   if(!fsSelectedWord){
     front.textContent = '言葉を選んでください';
+    front.style.fontFamily = FONT_KANA;
     front.style.fontSize = '48px';
     back.textContent = '';
     meaning.textContent = '';
@@ -479,15 +495,19 @@ function renderFsStage(){
   meaning.textContent = w.meaning_en;
 
   if(fsMode === 'reading'){
-    // kanji word always shown big; reading revealed on click, above, at ~1/4 size
+    // kanji word always shown big (kanji font); reading revealed on click, above, at ~1/4 size (kana font)
     front.textContent = w.word;
+    front.style.fontFamily = FONT_KANJI;
     front.style.fontSize = 'min(18vw, 22vh, 200px)';
+    back.style.fontFamily = FONT_KANA;
     back.style.fontSize = 'min(4.5vw, 5.5vh, 50px)';
     back.textContent = fsRevealed ? w.reading : '';
   } else {
-    // writing mode: reading always shown; kanji revealed on click, above, prominently
+    // writing mode: reading always shown (kana font); kanji revealed on click, above, prominently (kanji font)
     front.textContent = w.reading;
+    front.style.fontFamily = FONT_KANA;
     front.style.fontSize = 'min(11vw, 13vh, 110px)';
+    back.style.fontFamily = FONT_KANJI;
     back.style.fontSize = 'min(18vw, 22vh, 200px)';
     back.textContent = fsRevealed ? w.word : '';
   }
