@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;600;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=Klee+One:wght@400;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tensorflow/4.22.0/tf.min.js"></script>
+<script src="./model/kanjicanvas/kanji-canvas.min.js"></script>
 <style>
   :root{
     --paper:#F7F1E3;
@@ -154,6 +155,9 @@
   .kj-hw-cand.best{ border-color:var(--vermillion); background:#FBF0EC; }
   .kj-hw-cand.notfound{ opacity:0.55; cursor:default; }
   .kj-hw-cand.notfound:hover{ border-color:var(--hairline); }
+  .kj-hw-cand.shape{ border-color:var(--indigo); border-style:dashed; }
+  .kj-hw-cand.shape:hover{ border-style:solid; }
+  .score.shape-tag{ color:var(--indigo); font-weight:700; }
   .kj-hw-note{ font-size:10px; color:var(--ink-faint); margin-top:6px; line-height:1.5; }
 
   /* Jukugo (compound word) lookup panel */
