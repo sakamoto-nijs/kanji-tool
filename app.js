@@ -631,6 +631,101 @@ async function recognizeWithModel(strokes){
   }));
 }
 
+/* ================= Kanji Canvas (shape-matching, V2 backup recognizer) =================
+   DaKanji (the CNN above) is the primary recognizer. Kanji Canvas (asdfjkl/kanjicanvas,
+   MIT license) uses a completely different, non-neural approach: it compares the drawn
+   stroke shapes directly against a reference stroke database (derived from KanjiVG),
+   tolerating imperfect stroke order/count. Testing showed the two make different mistakes,
+   so here it is used only to *add* extra candidates DaKanji missed — never to replace or
+   reorder DaKanji's own results. It reports no confidence score (just a ranked list), so
+   its candidates are shown with a "形状候補" tag instead of a percentage. */
+
+let kanjiCanvasRefLoading = null;
+function loadKanjiCanvasRefPatterns(){
+  if(window.KanjiCanvas && KanjiCanvas.refPatterns) return Promise.resolve();
+  if(kanjiCanvasRefLoading) return kanjiCanvasRefLoading;
+  kanjiCanvasRefLoading = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = './model/kanjicanvas/ref-patterns.js';
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('failed to load kanji canvas reference data'));
+    document.head.appendChild(s);
+  });
+  return kanjiCanvasRefLoading;
+}
+
+const KC_HIDDEN_ID = 'kcHiddenCanvas';
+let kcHiddenCanvasEl = null;
+function ensureKcHiddenCanvas(){
+  if(kcHiddenCanvasEl) return;
+  kcHiddenCanvasEl = document.createElement('canvas');
+  kcHiddenCanvasEl.width = 256; kcHiddenCanvasEl.height = 256;
+  KanjiCanvas['canvas_'+KC_HIDDEN_ID] = kcHiddenCanvasEl;
+  KanjiCanvas['ctx_'+KC_HIDDEN_ID] = kcHiddenCanvasEl.getContext('2d');
+  KanjiCanvas['w_'+KC_HIDDEN_ID] = 256; KanjiCanvas['h_'+KC_HIDDEN_ID] = 256;
+}
+
+/* strokes: array of strokes captured by createDrawPad, in CSS-pixel space of a
+   srcWidth x srcHeight canvas. Returns an ordered array of candidate characters
+   (no confidence values available), or [] on any failure. */
+async function getKanjiCanvasCandidates(strokes, srcWidth, srcHeight){
+  if(!strokes || strokes.length === 0) return [];
+  try{
+    await loadKanjiCanvasRefPatterns();
+  } catch(e){
+    console.error(e);
+    return [];
+  }
+  ensureKcHiddenCanvas();
+  const sx = 255 / (srcWidth || 170);
+  const sy = 255 / (srcHeight || 170);
+  KanjiCanvas['recordedPattern_'+KC_HIDDEN_ID] = strokes.map(s => s.map(p => [p.x*sx, p.y*sy]));
+  try{
+    const result = KanjiCanvas.recognize(KC_HIDDEN_ID) || '';
+    return result.trim().split(/\s+/).filter(Boolean);
+  } catch(e){
+    console.error(e);
+    return [];
+  }
+}
+
+/* Combine DaKanji's (up to 8) results with extra Kanji Canvas candidates DaKanji
+   missed, up to MAX_TOTAL_CANDIDATES total. DaKanji's own ranking/scores are never
+   altered — Kanji Canvas entries are only ever appended at the end. */
+const MAX_TOTAL_CANDIDATES = 16;
+async function recognizeCombined(strokes, srcWidth, srcHeight){
+  const daResults = await recognizeWithModel(strokes); // [{char, prob}], up to 8
+  const daChars = new Set(daResults.map(r => r.char));
+  const kcChars = await getKanjiCanvasCandidates(strokes, srcWidth, srcHeight);
+  const extra = kcChars
+    .filter(c => !daChars.has(c))
+    .slice(0, Math.max(0, MAX_TOTAL_CANDIDATES - daResults.length))
+    .map(c => ({ char: c, source: 'shape' }));
+  return daResults.map(r => ({ char: r.char, prob: r.prob, source: 'dakanji' })).concat(extra);
+}
+
+/* Shared rendering for both the standalone handwriting tool and the jukugo tool's
+   per-character step. DaKanji entries show a confidence %; Kanji Canvas (shape-matching)
+   entries have no real confidence value, so they get a "形状候補" tag instead — showing a
+   fake percentage next to a real one would be misleading. */
+function renderCandidateBox(box, results, onPick){
+  box.innerHTML = '';
+  results.forEach((r, i) => {
+    const match = KANJI_DATA.find(k => k.kanji === r.char);
+    const isShape = r.source === 'shape';
+    const el = document.createElement('div');
+    el.className = 'kj-hw-cand' + (i===0 && !isShape ? ' best' : '') + (match ? '' : ' notfound') + (isShape ? ' shape' : '');
+    const scoreHtml = isShape ? `<div class="score shape-tag">形状候補</div>` : `<div class="score">${(r.prob*100).toFixed(0)}%</div>`;
+    el.innerHTML = match
+      ? `<div class="g">${buildStaticGlyph(match)}</div>${scoreHtml}`
+      : `<div class="g">${r.char}</div>${scoreHtml}`;
+    if(match && onPick){
+      el.addEventListener('click', () => onPick(match));
+    }
+    box.appendChild(el);
+  });
+}
+
 /* ---- generic draw pad factory (reused by the standalone handwriting tool and the jukugo tool) ---- */
 function createDrawPad(canvas, wrapEl){
   const ratio = window.devicePixelRatio || 1;
@@ -658,6 +753,8 @@ function createDrawPad(canvas, wrapEl){
 
   return {
     getStrokes: () => strokes,
+    width: rect.width,
+    height: rect.height,
     clear: () => { ctx.clearRect(0,0,canvas.width, canvas.height); strokes = []; current = null; }
   };
 }
@@ -677,6 +774,7 @@ hwToggle.addEventListener('click', () => {
         console.error(err);
         setHwStatus('モデルの読み込みに失敗しました（通信環境をご確認ください）。', false);
       });
+      loadKanjiCanvasRefPatterns().catch(err => console.error(err));
     }
   }
 });
@@ -696,22 +794,10 @@ document.getElementById('kjHwRecognize').onclick = async () => {
   setHwStatus('認識しています…', true);
   document.getElementById('kjHwRecognize').disabled = true;
   try{
-    const results = await recognizeWithModel(strokes);
-    setHwStatus('候補を表示しました（左ほど自信度が高い）', false);
+    const results = await recognizeCombined(strokes, hwPad.width, hwPad.height);
+    setHwStatus('候補を表示しました（左ほど自信度が高い。「形状候補」は別方式で見つかった追加候補です）', false);
     const box = document.getElementById('kjHwResults');
-    box.innerHTML = '';
-    results.forEach((r, i) => {
-      const match = KANJI_DATA.find(k => k.kanji === r.char);
-      const el = document.createElement('div');
-      el.className = 'kj-hw-cand' + (i===0 ? ' best' : '') + (match ? '' : ' notfound');
-      el.innerHTML = match
-        ? `<div class="g">${buildStaticGlyph(match)}</div><div class="score">${(r.prob*100).toFixed(0)}%</div>`
-        : `<div class="g">${r.char}</div><div class="score">${(r.prob*100).toFixed(0)}%</div>`;
-      if(match){
-        el.addEventListener('click', () => openModal(match));
-      }
-      box.appendChild(el);
-    });
+    renderCandidateBox(box, results, openModal);
     if(!results.some(r => KANJI_DATA.find(k => k.kanji === r.char))){
       const note = document.createElement('div');
       note.className = 'kj-hw-note';
@@ -812,6 +898,7 @@ function jukugoStartCount(n){
   document.getElementById('kjJukugoResults').innerHTML = '';
   setJukugoStatus('1文字目を書いてください。', false);
   loadDaKanjiModel().catch(()=>{});
+  loadKanjiCanvasRefPatterns().catch(()=>{});
 }
 
 function jukugoPickChar(kanjiChar){
@@ -869,22 +956,10 @@ document.getElementById('kjJukugoRecognize').addEventListener('click', async () 
   setJukugoStatus('認識しています…', true);
   document.getElementById('kjJukugoRecognize').disabled = true;
   try{
-    const results = await recognizeWithModel(strokes);
-    setJukugoStatus('候補を表示しました（左ほど自信度が高い）', false);
+    const results = await recognizeCombined(strokes, jukugoState.pad.width, jukugoState.pad.height);
+    setJukugoStatus('候補を表示しました（左ほど自信度が高い。「形状候補」は別方式で見つかった追加候補です）', false);
     const box = document.getElementById('kjJukugoResults');
-    box.innerHTML = '';
-    results.forEach((r, i) => {
-      const match = KANJI_DATA.find(k => k.kanji === r.char);
-      const el = document.createElement('div');
-      el.className = 'kj-hw-cand' + (i===0 ? ' best' : '') + (match ? '' : ' notfound');
-      el.innerHTML = match
-        ? `<div class="g">${buildStaticGlyph(match)}</div><div class="score">${(r.prob*100).toFixed(0)}%</div>`
-        : `<div class="g">${r.char}</div><div class="score">${(r.prob*100).toFixed(0)}%</div>`;
-      if(match){
-        el.addEventListener('click', () => jukugoPickChar(match.kanji));
-      }
-      box.appendChild(el);
-    });
+    renderCandidateBox(box, results, match => jukugoPickChar(match.kanji));
   } catch(err){
     console.error(err);
     setJukugoStatus('認識中にエラーが発生しました。', false);
