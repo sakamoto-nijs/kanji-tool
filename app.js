@@ -718,7 +718,7 @@ function renderCandidateBox(box, results, onPick){
     const isShape = r.source === 'shape';
     const el = document.createElement('div');
     el.className = 'kj-hw-cand' + (i===0 && !isShape ? ' best' : '') + (match ? '' : ' notfound') + (isShape ? ' shape' : '');
-    const scoreHtml = isShape ? `<div class="score shape-tag">形状候補</div>` : `<div class="score">${(r.prob*100).toFixed(0)}%</div>`;
+    const scoreHtml = isShape ? `` : `<div class="score">${(r.prob*100).toFixed(0)}%</div>`;
     el.innerHTML = match
       ? `<div class="g">${buildStaticGlyph(match)}</div>${scoreHtml}`
       : `<div class="g">${r.char}</div>${scoreHtml}`;
@@ -798,7 +798,7 @@ document.getElementById('kjHwRecognize').onclick = async () => {
   document.getElementById('kjHwRecognize').disabled = true;
   try{
     const results = await recognizeCombined(strokes, hwPad.width, hwPad.height);
-    setHwStatus('候補を表示しました（左ほど自信度が高い。「形状候補」は別方式で見つかった追加候補です）', false);
+    setHwStatus('候補を表示しました（左ほど自信度が高い）', false);
     const box = document.getElementById('kjHwResults');
     renderCandidateBox(box, results, openModal);
     if(!results.some(r => KANJI_DATA.find(k => k.kanji === r.char))){
@@ -960,7 +960,7 @@ document.getElementById('kjJukugoRecognize').addEventListener('click', async () 
   document.getElementById('kjJukugoRecognize').disabled = true;
   try{
     const results = await recognizeCombined(strokes, jukugoState.pad.width, jukugoState.pad.height);
-    setJukugoStatus('候補を表示しました（左ほど自信度が高い。「形状候補」は別方式で見つかった追加候補です）', false);
+    setJukugoStatus('候補を表示しました（左ほど自信度が高い）', false);
     const box = document.getElementById('kjJukugoResults');
     renderCandidateBox(box, results, match => jukugoPickChar(match.kanji));
   } catch(err){
