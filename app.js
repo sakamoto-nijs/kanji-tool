@@ -642,7 +642,10 @@ async function recognizeWithModel(strokes){
 
 let kanjiCanvasRefLoading = null;
 function loadKanjiCanvasRefPatterns(){
-  if(window.KanjiCanvas && KanjiCanvas.refPatterns) return Promise.resolve();
+  // kanji-canvas.min.js itself pre-declares KanjiCanvas.refPatterns = [] (an empty
+  // array), so a plain truthy check here would wrongly think the 6.4MB reference
+  // data is already loaded and skip loading it. Check its length instead.
+  if(window.KanjiCanvas && KanjiCanvas.refPatterns && KanjiCanvas.refPatterns.length > 0) return Promise.resolve();
   if(kanjiCanvasRefLoading) return kanjiCanvasRefLoading;
   kanjiCanvasRefLoading = new Promise((resolve, reject) => {
     const s = document.createElement('script');
