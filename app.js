@@ -1,5 +1,6 @@
 /* ================= Grid / search / filters ================= */
 let KANJI_DATA = [];
+let KANA_DATA = [];
 let kanjiMap = new Map(); // kanji character -> its data entry, for cross-linking compounds
 const state = { query:"", strokeFilter:null, radicalFilter:null, jlptFilter:null, gradeFilter:null, favoritesOnly:false, filtered:[] };
 let studyModeActive = false;
@@ -233,6 +234,10 @@ function buildStrokeSvg(container, strokes){
 
 function openModal(k, opts){
   opts = opts || {};
+  if(k.isKana){
+    renderKanaModal(k, opts);
+    return;
+  }
   if(studyModeActive){
     openFullscreen(k);
     return;
@@ -247,6 +252,10 @@ function openModal(k, opts){
 
   const modalEl = document.querySelector('.kj-modal');
   if(modalEl) modalEl.scrollTop = 0;
+  document.getElementById('kjModalKanjiRows').style.display = '';
+  document.getElementById('kjModalKanaRow').style.display = 'none';
+  document.getElementById('kjModalExampleBox').style.display = '';
+  document.getElementById('kjModalCompoundsBox').style.display = '';
   document.getElementById('kjModalKanjiTiny').textContent = k.kanji + '　部首：' + k.radical + '（' + k.radical_meaning_en + '）';
   document.getElementById('kjModalJlpt').textContent = k.jlpt;
   document.getElementById('kjModalOn').textContent = k.on.length ? k.on.join('、') : '－';
@@ -262,6 +271,50 @@ function openModal(k, opts){
   const stage = document.getElementById('kjStage');
   const pathEls = buildStrokeSvg(stage, k.strokes);
 
+  currentAnimSpeed = 700;
+  playAnimation(pathEls);
+  document.getElementById('kjReplay').onclick = () => playAnimation(pathEls);
+  document.getElementById('kjSlow').onclick = () => { currentAnimSpeed = 1400; playAnimation(pathEls); };
+  document.getElementById('kjCopyKanji').onclick = () => copyTextToClipboard(k.kanji, document.getElementById('kjCopyKanji'));
+
+  const starBtn = document.getElementById('kjModalStar');
+  const setStarUI = () => {
+    const isFav = favorites.has(k.kanji);
+    starBtn.textContent = isFav ? '★' : '☆';
+    starBtn.classList.toggle('active', isFav);
+    starBtn.title = isFav ? 'お気に入りから削除' : 'お気に入りに登録';
+  };
+  setStarUI();
+  starBtn.onclick = () => { toggleFavorite(k.kanji); setStarUI(); };
+
+  document.getElementById('kjOverlay').classList.add('show');
+}
+
+/* Hiragana get a deliberately minimal version of the same modal: just the
+   character, its stroke-order animation, and copy/favorite — no readings,
+   meaning, JLPT, example sentence, or compounds, since none of that applies. */
+function renderKanaModal(k, opts){
+  opts = opts || {};
+  if(!opts.fromHistory){
+    modalHistory = [];
+  }
+  currentModalKanji = k;
+  const backBtn = document.getElementById('kjModalBack');
+  backBtn.style.display = modalHistory.length > 0 ? '' : 'none';
+
+  const modalEl = document.querySelector('.kj-modal');
+  if(modalEl) modalEl.scrollTop = 0;
+  document.getElementById('kjModalKanjiRows').style.display = 'none';
+  document.getElementById('kjModalKanaRow').style.display = '';
+  document.getElementById('kjModalExampleBox').style.display = 'none';
+  document.getElementById('kjModalCompoundsBox').style.display = 'none';
+
+  document.getElementById('kjModalKanjiTiny').textContent = k.kanji + '　ひらがな';
+  document.getElementById('kjModalJlpt').textContent = '';
+  document.getElementById('kjModalKanaStroke').textContent = k.strokeCount + '画';
+
+  const stage = document.getElementById('kjStage');
+  const pathEls = buildStrokeSvg(stage, k.strokes);
   currentAnimSpeed = 700;
   playAnimation(pathEls);
   document.getElementById('kjReplay').onclick = () => playAnimation(pathEls);
@@ -714,7 +767,7 @@ async function recognizeCombined(strokes, srcWidth, srcHeight){
 function renderCandidateBox(box, results, onPick){
   box.innerHTML = '';
   results.forEach((r, i) => {
-    const match = KANJI_DATA.find(k => k.kanji === r.char);
+    const match = kanjiMap.get(r.char);
     const isShape = r.source === 'shape';
     const el = document.createElement('div');
     el.className = 'kj-hw-cand' + (i===0 && !isShape ? ' best' : '') + (match ? '' : ' notfound') + (isShape ? ' shape' : '');
@@ -801,11 +854,11 @@ document.getElementById('kjHwRecognize').onclick = async () => {
     setHwStatus('候補を表示しました（左ほど自信度が高い）', false);
     const box = document.getElementById('kjHwResults');
     renderCandidateBox(box, results, openModal);
-    if(!results.some(r => KANJI_DATA.find(k => k.kanji === r.char))){
+    if(!results.some(r => kanjiMap.has(r.char))){
       const note = document.createElement('div');
       note.className = 'kj-hw-note';
       note.style.flexBasis = '100%';
-      note.textContent = '認識モデル自体はこの文字を含む6500字以上を識別できますが、常用漢字' + KANJI_DATA.length + '字の範囲外（人名や旧字体など）の可能性があります。';
+      note.textContent = '認識モデル自体はこの文字を含む6500字以上を識別できますが、収録されている常用漢字・ひらがなの範囲外（人名や旧字体など）の可能性があります。';
       box.appendChild(note);
     }
   } catch(err){
@@ -816,13 +869,13 @@ document.getElementById('kjHwRecognize').onclick = async () => {
   }
 };
 
-/* ================= Jukugo (compound word) lookup tool ================= */
+/* ================= Jukugo / general dictionary lookup tool ================= */
 let COMPOUNDS_INDEX = null;
 let compoundsIndexLoading = null;
 async function loadCompoundsIndex(){
   if(COMPOUNDS_INDEX) return COMPOUNDS_INDEX;
   if(compoundsIndexLoading) return compoundsIndexLoading;
-  compoundsIndexLoading = fetch('./data/compounds-index.json').then(r => r.json()).then(data => {
+  compoundsIndexLoading = fetch('./data/dict-index.json').then(r => r.json()).then(data => {
     COMPOUNDS_INDEX = data;
     return data;
   });
@@ -870,18 +923,20 @@ async function jukugoLookup(word){
 
   const entries = index[word];
   if(entries && entries.length){
-    resultBox.innerHTML = `
-      <div class="word">${jukugoWordHtml(word)}</div>
-      ${entries.map(e => `<div class="reading">${e.reading}</div><div class="gloss">${e.meaning_en}</div>`).join('')}
-      <button class="kj-btn ghost" id="kjJukugoAgain" style="margin-top:8px;height:34px;padding:0 12px;font-size:12px;">別の熟語を調べる</button>
+    resultBox.innerHTML = entries.map(e => `
+      <div class="word">${jukugoWordHtml(e.display)}</div>
+      <div class="reading">${e.reading}</div>
+      <div class="gloss">${e.meaning_en}</div>
+    `).join('<div style="height:14px"></div>') + `
+      <button class="kj-btn ghost" id="kjJukugoAgain" style="margin-top:8px;height:34px;padding:0 12px;font-size:12px;">別の言葉を調べる</button>
     `;
   } else {
     resultBox.innerHTML = `
       <div class="notfound-msg">「${word}」は現在のデータベースには見つかりませんでした。下のボタンでコピーして、他の辞書で調べることができます。</div>
       <div class="notfound-word">${word}</div>
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
-        <button class="kj-btn" id="kjJukugoCopy">⧉ この熟語をコピー</button>
-        <button class="kj-btn ghost" id="kjJukugoAgain">別の熟語を調べる</button>
+        <button class="kj-btn" id="kjJukugoCopy">⧉ この言葉をコピー</button>
+        <button class="kj-btn ghost" id="kjJukugoAgain">別の言葉を調べる</button>
       </div>
     `;
     document.getElementById('kjJukugoCopy').onclick = () => copyTextToClipboard(word, document.getElementById('kjJukugoCopy'));
@@ -1002,6 +1057,19 @@ async function boot(){
   }
   state.filtered = KANJI_DATA.slice();
   kanjiMap = new Map(KANJI_DATA.map(k => [k.kanji, k]));
+
+  // Hiragana: loaded separately (much smaller dataset, stroke order only) and merged
+  // into the same lookup map so kana can be picked/linked everywhere kanji can be.
+  try{
+    const kanaRes = await fetch('./data/kana-data.json');
+    KANA_DATA = await kanaRes.json();
+    KANA_DATA.forEach(k => {
+      kanjiMap.set(k.kana, { kanji: k.kana, strokes: k.strokes, strokeCount: k.strokeCount, isKana: true });
+    });
+  } catch(err){
+    console.error('kana data failed to load (non-fatal):', err);
+  }
+
   loadFavorites();
   updateFavToggleLabel();
   renderStrokeChips();
