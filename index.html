@@ -320,7 +320,7 @@
         <input id="kjSearchInput" type="text" placeholder="漢字・読み方（ひらがな）・意味で検索　例：やま／mountain／山">
       </div>
       <button class="kj-btn ghost" id="kjHwToggle">✎ 手書きで探す</button>
-      <button class="kj-btn ghost" id="kjJukugoToggle">🔤 熟語で調べる</button>
+      <button class="kj-btn ghost" id="kjJukugoToggle">🔤 熟語・言葉で調べる</button>
       <button class="kj-btn ghost" id="kjFavToggle">☆ お気に入り</button>
       <button class="kj-btn ghost" id="kjStudyModeToggle">🖥 学習モード</button>
     </div>
@@ -345,15 +345,15 @@
       <div class="kj-jk-typebox">
         <span class="label">直接入力・貼り付けで調べる</span>
         <div class="kj-jk-typerow">
-          <input id="kjJukugoInput" type="text" placeholder="例：風景">
+          <input id="kjJukugoInput" type="text" placeholder="例：風景、ほほえみ">
           <button class="kj-btn" id="kjJukugoTypeSearch">調べる</button>
         </div>
       </div>
 
-      <div class="kj-jk-divider">または、1文字ずつ手書きで選んで調べる</div>
+      <div class="kj-jk-divider">または、1文字ずつ手書きで選んで調べる（ひらがなも書けます）</div>
 
       <div class="kj-jk-count" id="kjJukugoCountBox">
-        <span class="label">何文字の熟語ですか？</span>
+        <span class="label">何文字の言葉ですか？</span>
         <div class="kj-jk-countbtns">
           <button class="kj-btn ghost" data-n="2">2文字</button>
           <button class="kj-btn ghost" data-n="3">3文字</button>
@@ -395,7 +395,7 @@
   <div class="kj-grid" id="kjGrid"></div>
 
   <div class="kj-modal-foot" style="margin-top:40px;">
-    常用漢字・JIS X 0208 第1〜第2水準 合わせて 6357 字を収録。書き順データ: KanjiVG（CC BY-SA 3.0, © Ulrich Apel ほか）。読み方・意味・JLPTレベル: KANJIDIC2（EDRDG, CC BY-SA 4.0）および davidluzgouveia/kanji-data（JLPT区分は Jonathan Waller's JLPT Resources に基づく）。熟語データ: JMdict（EDRDG, CC BY-SA 4.0）。例文の多くは Tatoeba Project（CC BY 2.0 FR、田中コーパス由来）より選定し、収録が少ない漢字については編集部でオリジナル作成しました。
+    常用漢字・JIS X 0208 第1〜第2水準 合わせて 6357 字 ＋ ひらがな81字を収録。書き順データ: KanjiVG（CC BY-SA 3.0, © Ulrich Apel ほか）。読み方・意味・JLPTレベル: KANJIDIC2（EDRDG, CC BY-SA 4.0）および davidluzgouveia/kanji-data（JLPT区分は Jonathan Waller's JLPT Resources に基づく）。熟語・かな語データ: JMdict（EDRDG, CC BY-SA 4.0）。例文の多くは Tatoeba Project（CC BY 2.0 FR、田中コーパス由来）より選定し、収録が少ない漢字については編集部でオリジナル作成しました。
     手書き認識モデル: DaKanji Single Kanji Recognition（CaptainDario, MIT License, ETL文字データベース＋KanjiVGで学習）を、このページ内でTensorFlow.jsにより実行しています（6,500字以上に対応、外部サーバー通信なし）。
   </div>
 </div>
@@ -414,14 +414,19 @@
           <div class="kanji-big" id="kjModalKanjiTiny"></div>
           <div class="jlpt-badge" id="kjModalJlpt"></div>
         </div>
-        <div class="row"><span class="k">音読み</span><span class="v" id="kjModalOn"></span></div>
-        <div class="row"><span class="k">訓読み</span><span class="v" id="kjModalKun"></span></div>
-        <div class="row"><span class="k">意味（英語）</span><span class="v" id="kjModalMeaning"></span></div>
-        <div class="row"><span class="k">画数 ／ 部首</span><span class="v" id="kjModalStrokeRadical"></span></div>
-        <div class="row"><span class="k">学習学年</span><span class="v meaning-en" id="kjModalMeaningEn"></span></div>
+        <div id="kjModalKanjiRows">
+          <div class="row"><span class="k">音読み</span><span class="v" id="kjModalOn"></span></div>
+          <div class="row"><span class="k">訓読み</span><span class="v" id="kjModalKun"></span></div>
+          <div class="row"><span class="k">意味（英語）</span><span class="v" id="kjModalMeaning"></span></div>
+          <div class="row"><span class="k">画数 ／ 部首</span><span class="v" id="kjModalStrokeRadical"></span></div>
+          <div class="row"><span class="k">学習学年</span><span class="v meaning-en" id="kjModalMeaningEn"></span></div>
+        </div>
+        <div id="kjModalKanaRow" style="display:none;">
+          <div class="row"><span class="k">画数</span><span class="v" id="kjModalKanaStroke"></span></div>
+        </div>
       </div>
     </div>
-    <div class="kj-example">
+    <div class="kj-example" id="kjModalExampleBox">
       <span class="k">例文</span>
       <div class="ja" id="kjModalExJa"></div>
       <div class="en" id="kjModalExEn"></div>
@@ -431,8 +436,8 @@
       <button class="kj-btn ghost" id="kjSlow">ゆっくり再生</button>
       <button class="kj-btn ghost" id="kjCopyKanji">⧉ 漢字をコピー</button>
     </div>
-    <div class="kj-compounds">
-      <span class="k">この漢字を使った熟語</span>
+    <div class="kj-compounds" id="kjModalCompoundsBox">
+      <span class="k">この漢字を使った言葉</span>
       <div class="list" id="kjModalCompounds"></div>
     </div>
   </div>
