@@ -875,9 +875,12 @@ let compoundsIndexLoading = null;
 async function loadCompoundsIndex(){
   if(COMPOUNDS_INDEX) return COMPOUNDS_INDEX;
   if(compoundsIndexLoading) return compoundsIndexLoading;
-  compoundsIndexLoading = fetch('./data/dict-index.json').then(r => r.json()).then(data => {
-    COMPOUNDS_INDEX = data;
-    return data;
+  compoundsIndexLoading = Promise.all([
+    fetch('./data/dict-index-part1.json').then(r => r.json()),
+    fetch('./data/dict-index-part2.json').then(r => r.json())
+  ]).then(([part1, part2]) => {
+    COMPOUNDS_INDEX = Object.assign({}, part1, part2);
+    return COMPOUNDS_INDEX;
   });
   return compoundsIndexLoading;
 }
