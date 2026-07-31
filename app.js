@@ -525,8 +525,8 @@ function renderFsWordList(){
   });
 }
 
-const FONT_KANJI = "'Shippori Mincho', serif";
-const FONT_KANA = "'Zen Kaku Gothic New', sans-serif";
+const FONT_KANJI = "'Klee One', sans-serif";
+const FONT_KANA = "'Klee One', sans-serif";
 
 function renderFsStage(){
   const back = document.getElementById('kjFsBack');
