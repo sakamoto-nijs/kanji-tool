@@ -268,6 +268,16 @@ function openModal(k, opts){
 
   renderCompoundsList(document.getElementById('kjModalCompounds'), k);
 
+  // Show the modal BEFORE building/measuring the stroke SVG. path.getTotalLength()
+  // (used by playAnimation) can return an incorrect length — often 0, causing that
+  // stroke to snap in instead of drawing — when called on an element that's still
+  // inside a display:none ancestor. Flipping the overlay visible first, then forcing
+  // a synchronous layout flush (reading offsetHeight), guarantees the browser has a
+  // real layout to measure against before we touch getTotalLength().
+  const overlayEl = document.getElementById('kjOverlay');
+  overlayEl.classList.add('show');
+  void overlayEl.offsetHeight;
+
   const stage = document.getElementById('kjStage');
   const pathEls = buildStrokeSvg(stage, k.strokes);
 
@@ -286,8 +296,6 @@ function openModal(k, opts){
   };
   setStarUI();
   starBtn.onclick = () => { toggleFavorite(k.kanji); setStarUI(); };
-
-  document.getElementById('kjOverlay').classList.add('show');
 }
 
 /* Hiragana get a deliberately minimal version of the same modal: just the
@@ -313,6 +321,13 @@ function renderKanaModal(k, opts){
   document.getElementById('kjModalJlpt').textContent = '';
   document.getElementById('kjModalKanaStroke').textContent = k.strokeCount + '画';
 
+  // See the comment in openModal(): show the overlay and force a layout flush
+  // BEFORE building/measuring the stroke SVG, so getTotalLength() never runs
+  // against a still-hidden (display:none) element.
+  const overlayEl = document.getElementById('kjOverlay');
+  overlayEl.classList.add('show');
+  void overlayEl.offsetHeight;
+
   const stage = document.getElementById('kjStage');
   const pathEls = buildStrokeSvg(stage, k.strokes);
   currentAnimSpeed = 700;
@@ -330,8 +345,6 @@ function renderKanaModal(k, opts){
   };
   setStarUI();
   starBtn.onclick = () => { toggleFavorite(k.kanji); setStarUI(); };
-
-  document.getElementById('kjOverlay').classList.add('show');
 }
 function playAnimation(pathEls){
   // 1) Instantly hide every stroke (no transition yet).
@@ -430,9 +443,16 @@ function openFullscreen(k){
   document.querySelectorAll('.kj-fs-modebtn').forEach(b => b.classList.toggle('active', b.dataset.mode === 'normal'));
   document.getElementById('kjFsNormal').style.display = 'flex';
   document.getElementById('kjFsStudyView').style.display = 'none';
-  renderFsNormal(k);
   document.body.style.overflow = 'hidden';
-  document.getElementById('kjFullscreen').classList.add('show');
+
+  // Same fix as openModal(): show the fullscreen panel and force a layout flush
+  // BEFORE renderFsNormal builds/measures the stroke SVG, so getTotalLength()
+  // never runs against a still-hidden (display:none) element.
+  const fsEl = document.getElementById('kjFullscreen');
+  fsEl.classList.add('show');
+  void fsEl.offsetHeight;
+
+  renderFsNormal(k);
 }
 
 function closeFullscreen(){
