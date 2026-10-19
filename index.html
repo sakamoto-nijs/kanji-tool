@@ -135,7 +135,9 @@
   }
 
   /* Handwriting + words panels */
-  .kj-hw-panel.show{ display:grid; grid-template-columns:180px 1fr 1fr; grid-template-areas:"canvas hint results" "canvas actions results" "canvas status results"; gap:8px 20px; align-items:start; }
+  .kj-hw-panel.show{ display:block; }
+  .kj-hw-count{ margin-bottom:12px; }
+  .kj-hw-body{ display:grid; grid-template-columns:180px 1fr 1fr; grid-template-areas:"canvas hint results" "canvas actions results" "canvas status results"; gap:8px 20px; align-items:start; }
   .kj-pad{ width:180px; height:180px; border:3px solid var(--red-bd); border-radius:20px; overflow:hidden; background:var(--stroke-bg); position:relative; touch-action:none; }
   .kj-pad::before{ content:""; position:absolute; left:50%; top:0; bottom:0; border-left:2px dashed var(--line); }
   .kj-pad::after{ content:""; position:absolute; top:50%; left:0; right:0; border-top:2px dashed var(--line); }
@@ -166,18 +168,11 @@
   .kj-jk-panel.show{ display:flex; flex-direction:column; gap:14px; }
   .kj-jk-typerow{ display:flex; gap:8px; flex-wrap:wrap; }
   .kj-jk-typerow input{ flex:1 1 180px; min-width:120px; min-height:48px; border:3px solid var(--ink); border-radius:999px; background:var(--surface); padding:0 18px; font-size:1rem; }
-  .kj-jk-divider{ text-align:center; font-size:.82rem; font-weight:700; color:var(--ink-soft); border-top:2px dashed var(--line); padding-top:14px; }
-  .kj-jk-divider small{ display:block; font-weight:500; }
   .kj-jk-countbtns{ display:flex; gap:8px; flex-wrap:wrap; }
   .kj-jk-progress{ display:flex; gap:8px; justify-content:center; margin-bottom:10px; }
   .kj-jk-progress .slot{ width:48px; height:48px; border:3px solid var(--line); border-radius:14px; background:var(--surface); display:flex; align-items:center; justify-content:center; font-family:var(--font-kl); font-size:1.6rem; color:var(--ink-soft); }
   .kj-jk-progress .slot.filled{ border-color:var(--orange); background:var(--orange-soft); color:var(--ink); }
   .kj-jk-progress .slot.current{ border-style:dashed; border-color:var(--ink); }
-  .kj-jk-build .kj-pad{ margin:0 auto; }
-  .kj-jk-actions{ display:flex; gap:8px; flex-wrap:wrap; justify-content:center; margin-top:10px; }
-  .kj-jk-status{ justify-content:center; margin-top:6px; }
-  .kj-jk-results{ text-align:center; }
-  .kj-jk-results .kj-hw-reslist{ justify-content:center; }
   .kj-jk-result{ background:var(--orange-soft); border:2px solid var(--orange-bd); border-radius:20px; padding:16px 18px; }
   .kj-jk-result .word{ font-family:var(--font-kl); font-weight:600; font-size:2rem; margin-bottom:4px; }
   .kj-jk-result .word .wc.link{ color:var(--red); cursor:pointer; text-decoration:underline dotted; text-underline-offset:.14em; }
@@ -372,7 +367,7 @@
     .kj-compound-item .gloss{ grid-column:1/-1; }
   }
   @media (max-width:800px){
-    .kj-hw-panel.show{ grid-template-columns:minmax(0,1fr); grid-template-areas:"canvas" "actions" "hint" "status" "results"; }
+    .kj-hw-body{ grid-template-columns:minmax(0,1fr); grid-template-areas:"canvas" "actions" "hint" "status" "results"; }
     .kj-hw-canvas-wrap{ width:100%; max-width:320px; height:auto; aspect-ratio:1/1; margin:0 auto; }
     .kj-fs-normal{ padding:16px; gap:20px; }
     .kj-fs-stage{ width:calc(min(80vw,80vh,340px)*var(--s)); height:calc(min(80vw,80vh,340px)*var(--s)); }
@@ -497,23 +492,43 @@
       <div class="kj-kana-hint">例：「やま」→ 山 ／ 「たべる」→ 食 　Example: type “やま” to find 山.</div>
     </div>
 
-    <!-- Handwriting panel -->
+    <!-- Handwriting panel (1 letter = kanji, 2-4 letters = word) -->
     <div class="kj-panel kj-hw-panel c-blue" id="kjHwPanel">
-      <div class="kj-pad kj-hw-canvas-wrap"><canvas id="kjHwCanvas"></canvas></div>
-      <div class="kj-hw-actions">
-        <button class="kj-btn solid c-blue" id="kjHwRecognize" type="button"><svg class="ic"><use href="#i-search"/></svg><span class="lb"><b>この字を認識する</b><small>Recognize</small></span></button>
-        <button class="kj-btn c-gray" id="kjHwClear" type="button"><svg class="ic"><use href="#i-rotate"/></svg><span class="lb"><b>クリア</b><small>Clear</small></span></button>
+      <div class="kj-panel-title"><span class="bd"><svg class="ic"><use href="#i-pen"/></svg></span>
+        <span>手書きで探す <small>Draw a kanji or a word</small></span></div>
+
+      <div class="kj-hw-count" id="kjHwCountBox">
+        <span class="kj-label">何文字ですか？ <small>How many letters?</small></span>
+        <div class="kj-jk-countbtns">
+          <button class="kj-btn c-blue on" type="button" data-n="1" aria-pressed="true"><span class="lb"><b>1文字</b><small>1 letter (kanji)</small></span></button>
+          <button class="kj-btn c-blue" type="button" data-n="2" aria-pressed="false"><span class="lb"><b>2文字</b><small>2 letters</small></span></button>
+          <button class="kj-btn c-blue" type="button" data-n="3" aria-pressed="false"><span class="lb"><b>3文字</b><small>3 letters</small></span></button>
+          <button class="kj-btn c-blue" type="button" data-n="4" aria-pressed="false"><span class="lb"><b>4文字</b><small>4 letters</small></span></button>
+        </div>
       </div>
-      <div class="kj-hw-hint">枠の中に、探したい漢字を書いてください。書き順や画数が多少違っても、AIモデルが字の形から認識します。
-        <small>Write the kanji in the box. The AI model reads the shape, even if the stroke order is a little different.</small></div>
-      <div class="kj-status kj-hw-status" id="kjHwStatus"><span class="spinner"></span><span class="txt"></span></div>
-      <div class="kj-hw-results">
-        <span class="kj-label">候補（AIモデルによる認識結果） <small>Results</small></span>
-        <div class="kj-hw-reslist" id="kjHwResults"></div>
+
+      <div class="kj-jk-progress" id="kjHwProgress" style="display:none;"></div>
+
+      <div class="kj-hw-body">
+        <div class="kj-pad kj-hw-canvas-wrap"><canvas id="kjHwCanvas"></canvas></div>
+        <div class="kj-hw-actions">
+          <button class="kj-btn solid c-blue" id="kjHwRecognize" type="button"><svg class="ic"><use href="#i-search"/></svg><span class="lb"><b>この字を認識する</b><small>Recognize</small></span></button>
+          <button class="kj-btn c-gray" id="kjHwClear" type="button"><svg class="ic"><use href="#i-rotate"/></svg><span class="lb"><b>クリア</b><small>Clear</small></span></button>
+          <button class="kj-btn c-gray" id="kjHwRestart" type="button" style="display:none;"><svg class="ic"><use href="#i-arrow-left"/></svg><span class="lb"><b>最初からやり直す</b><small>Start over</small></span></button>
+        </div>
+        <div class="kj-hw-hint">枠の中に、探したい字を書いてください。書き順や画数が多少違っても、AIモデルが字の形から認識します。2文字以上のときは、1文字ずつ候補を選んでください（ひらがなも書けます）。
+          <small>Write the letter in the box. The AI model reads the shape, even if the stroke order is a little different. For 2 or more letters, pick the correct candidate for each letter (hiragana is OK too).</small></div>
+        <div class="kj-status kj-hw-status" id="kjHwStatus"><span class="spinner"></span><span class="txt"></span></div>
+        <div class="kj-hw-results">
+          <span class="kj-label">候補（合っていれば選んでください） <small>Results — pick the correct one</small></span>
+          <div class="kj-hw-reslist" id="kjHwResults"></div>
+        </div>
       </div>
+
+      <div class="kj-jk-result" id="kjHwWordBox" style="display:none; margin-top:14px;"></div>
     </div>
 
-    <!-- Words (jukugo) panel -->
+    <!-- Words (jukugo) panel: type or paste -->
     <div class="kj-panel kj-jk-panel c-orange" id="kjJukugoPanel">
       <div class="kj-panel-title"><span class="bd"><svg class="ic"><use href="#i-book-open"/></svg></span>
         <span>熟語・言葉で調べる <small>Look up words</small></span></div>
@@ -524,33 +539,8 @@
           <button class="kj-btn solid c-orange" id="kjJukugoTypeSearch" type="button"><svg class="ic"><use href="#i-search"/></svg><span class="lb"><b>調べる</b><small>Search</small></span></button>
         </div>
       </div>
-
-      <div class="kj-jk-divider">または、1文字ずつ手書きで選んで調べる（ひらがなも書けます）<small>Or draw the word one letter at a time (hiragana is OK too)</small></div>
-
-      <div class="kj-jk-count" id="kjJukugoCountBox">
-        <span class="kj-label">何文字の言葉ですか？ <small>How many letters?</small></span>
-        <div class="kj-jk-countbtns">
-          <button class="kj-btn c-orange" type="button" data-n="2"><span class="lb"><b>2文字</b><small>2 letters</small></span></button>
-          <button class="kj-btn c-orange" type="button" data-n="3"><span class="lb"><b>3文字</b><small>3 letters</small></span></button>
-          <button class="kj-btn c-orange" type="button" data-n="4"><span class="lb"><b>4文字</b><small>4 letters</small></span></button>
-        </div>
-      </div>
-
-      <div class="kj-jk-build" id="kjJukugoBuild" style="display:none;">
-        <div class="kj-jk-progress" id="kjJukugoProgress"></div>
-        <div class="kj-pad kj-jk-canvas-wrap"><canvas id="kjJukugoCanvas"></canvas></div>
-        <div class="kj-jk-actions">
-          <button class="kj-btn solid c-blue" id="kjJukugoRecognize" type="button"><svg class="ic"><use href="#i-search"/></svg><span class="lb"><b>この字を認識する</b><small>Recognize</small></span></button>
-          <button class="kj-btn c-gray" id="kjJukugoClear" type="button"><svg class="ic"><use href="#i-rotate"/></svg><span class="lb"><b>クリア</b><small>Clear</small></span></button>
-          <button class="kj-btn c-gray" id="kjJukugoRestart" type="button"><svg class="ic"><use href="#i-arrow-left"/></svg><span class="lb"><b>最初からやり直す</b><small>Start over</small></span></button>
-        </div>
-        <div class="kj-status kj-jk-status" id="kjJukugoStatus"><span class="spinner"></span><span class="txt"></span></div>
-        <div class="kj-jk-results">
-          <span class="kj-label">候補（合っていれば選んでください） <small>Pick the correct one</small></span>
-          <div class="kj-hw-reslist" id="kjJukugoResults"></div>
-        </div>
-      </div>
-
+      <div class="kj-hw-hint">手書きで言葉を調べたいときは、「手書きで探す」を開いて、文字数（2〜4文字）を選んでください。
+        <small>To draw a word by hand, open “Draw a kanji” and choose 2–4 letters.</small></div>
       <div class="kj-jk-result" id="kjJukugoResultBox" style="display:none;"></div>
     </div>
 
