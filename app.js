@@ -1,9 +1,22 @@
-/* ================= Grid / search / filters ================= */
+/* =====================================================================
+   筆順 -hitsujun-  app.js
+   Part 1: data, search, filters, home tiles, result grid
+   ===================================================================== */
 let KANJI_DATA = [];
 let KANA_DATA = [];
 let kanjiMap = new Map(); // kanji character -> its data entry, for cross-linking compounds
-const state = { query:"", strokeFilter:null, radicalFilter:null, jlptFilter:null, gradeFilter:null, favoritesOnly:false, filtered:[] };
+const state = { query:"", strokeFilter:null, radicalFilter:null, jlptFilter:null, gradeFilter:null, favoritesOnly:false, filtered:[], shown:0 };
+const PAGE_SIZE = 100; // how many kanji cards are drawn at once
 let studyModeActive = false;
+
+const $ = id => document.getElementById(id);
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function icon(name){ return `<svg class="ic"><use href="#i-${name}"/></svg>`; }
+
+/* ---- Colours by JLPT level (colour is never the only cue: the level text is always shown too) ---- */
+const JLPT_COLOR = { N5:'green', N4:'teal', N3:'blue', N2:'purple', N1:'red' };
+function jlptCls(l){ return 'c-' + (JLPT_COLOR[l] || 'gray'); }
+const JLPT_HINT = { N5:'Basic', N4:'Elementary', N3:'Intermediate', N2:'Upper intermediate', N1:'Advanced', '対象外':'Not in JLPT lists' };
 
 /* ---- Favorites (stored in the browser, no account needed) ---- */
 const FAV_KEY = 'hitsujun-favorites';
@@ -26,80 +39,271 @@ function toggleFavorite(kanji){
   if(state.favoritesOnly) applyFilters();
 }
 function updateFavToggleLabel(){
-  const btn = document.getElementById('kjFavToggle');
-  btn.textContent = (state.favoritesOnly ? '★' : '☆') + ' お気に入り' + (favorites.size ? ` (${favorites.size})` : '');
+  $('kjFavCount').textContent = favorites.size ? ` (${favorites.size})` : '';
+  $('kjFavToggle').setAttribute('aria-pressed', state.favoritesOnly ? 'true' : 'false');
+}
+
+/* ---- Grade helpers ---- */
+function gradeBucket(g){
+  if(g >= 1 && g <= 6) return g;
+  if(g === 8) return 8;
+  return 99; // covers grade 9, 10 (jinmeiyou), and ungraded JIS X0208 kanji -> shown as 高校
+}
+function gradeLabel(g){
+  const b = gradeBucket(g);
+  if(b === 8) return '中学';
+  if(b === 99) return '高校';
+  return '小' + b;
+}
+function gradeEn(g){
+  const b = gradeBucket(g);
+  if(b === 8) return 'Junior high';
+  if(b === 99) return 'High school & above';
+  return 'Elementary ' + b;
+}
+
+/* ---- Reading helpers ---- */
+// 'た.べる' -> stem + faint dot + okurigana (the part after the dot is the kana that follows the kanji)
+function fmtReading(r){
+  const i = r.indexOf('.');
+  if(i < 0) return esc(r);
+  return esc(r.slice(0, i)) + '<i class="sep">.</i><span class="okuri">' + esc(r.slice(i + 1)) + '</span>';
+}
+function kataToHira(s){ return s.replace(/[ァ-ヶ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60)); }
+function normReading(r){ return kataToHira(String(r)).replace(/[.\-\s]/g, ''); }
+function normStem(r){ return kataToHira(String(r).split('.')[0]).replace(/[\-\s]/g, ''); }
+
+/* =====================================================================
+   Search (readings first, then meanings, then words)
+   ===================================================================== */
+let searchReady = false;
+function ensureSearchIndex(){
+  if(searchReady) return;
+  KANJI_DATA.forEach((k, i) => {
+    const rds = k.on.concat(k.kun);
+    k._i = i;
+    k._full = rds.map(normReading);
+    k._stem = rds.map(normStem);
+    k._mean = k.meanings_en.map(m => m.toLowerCase());
+    k._rad = (k.radical_meaning_en || '').toLowerCase();
+    k._jl = (k.jlpt || '').toLowerCase();
+    k._comp = (k.compounds || []).map(c => c.word + ' ' + normReading(c.reading) + ' ' + String(c.meaning_en).toLowerCase()).join('|');
+  });
+  searchReady = true;
+}
+
+/* tier 0 = the kanji itself, 1 = reading matches exactly, 2 = reading starts with the text,
+   3 = English word / JLPT level / radical match, 4 = contained in a reading or meaning, 5 = found only in a word that uses it. -1 = no match */
+function searchTier(k, q, qr){
+  if(q.length <= 8 && q.includes(k.kanji)) return 0;
+  const full = k._full, stem = k._stem;
+  for(let i = 0; i < full.length; i++){ if(full[i] === qr || stem[i] === qr) return 1; }
+  for(let i = 0; i < full.length; i++){ if(full[i].startsWith(qr)) return 2; }
+  if(k._jl === q || k.radical === q) return 3;
+  for(const m of k._mean){ if(m === q || m.split(/[\s,;()\/]+/).includes(q)) return 3; }
+  if(full.some(r => r.includes(qr)) || k._mean.some(m => m.includes(q)) || k._rad.includes(q)) return 4;
+  if(k._comp.includes(q) || k._comp.includes(qr)) return 5;
+  return -1;
+}
+
+function hasCondition(){
+  return !!(state.query.trim() || state.strokeFilter || state.radicalFilter || state.jlptFilter || state.gradeFilter !== null || state.favoritesOnly);
 }
 
 function applyFilters(){
-  const q = state.query.trim().toLowerCase();
-  state.filtered = KANJI_DATA.filter(k => {
+  const cond = hasCondition();
+  if(!cond){
+    state.filtered = [];
+    state.shown = 0;
+    renderGrid(false);
+    renderCount();
+    return;
+  }
+  let list = KANJI_DATA.filter(k => {
     if(state.favoritesOnly && !favorites.has(k.kanji)) return false;
     if(state.strokeFilter && k.strokeCount !== state.strokeFilter) return false;
     if(state.radicalFilter && k.radical !== state.radicalFilter) return false;
     if(state.jlptFilter && k.jlpt !== state.jlptFilter) return false;
     if(state.gradeFilter !== null && gradeBucket(k.grade) !== state.gradeFilter) return false;
-    if(!q) return true;
-    const compoundHay = (k.compounds||[]).map(c => c.word+' '+c.reading+' '+c.meaning_en).join(' ');
-    const hay = [k.kanji, ...k.on, ...k.kun, ...k.meanings_en, k.radical, k.radical_meaning_en, k.jlpt, compoundHay].join(" ").toLowerCase();
-    return hay.includes(q);
+    return true;
   });
-  renderGrid(); renderCount();
+  const q = kataToHira(state.query.trim().toLowerCase());
+  if(q){
+    ensureSearchIndex();
+    const qr = q.replace(/[.\-\s]/g, '') || q;
+    const scored = [];
+    list.forEach(k => {
+      const t = searchTier(k, q, qr);
+      if(t >= 0) scored.push({ k, t, p: t === 0 ? q.indexOf(k.kanji) : 0 });
+    });
+    scored.sort((a, b) => (a.t - b.t) || (a.p - b.p) || (a.k._i - b.k._i));
+    list = scored.map(s => s.k);
+  }
+  state.filtered = list;
+  state.shown = 0;
+  renderGrid(false);
+  renderCount();
 }
-function renderCount(){ document.getElementById('kjCount').textContent = state.filtered.length + ' / ' + KANJI_DATA.length + ' 字'; }
 
+function renderCount(){
+  const el = $('kjCount');
+  const clearBtn = $('kjClearFilters');
+  if(!hasCondition()){
+    el.textContent = `全${KANJI_DATA.length}字 / ${KANJI_DATA.length} kanji in total`;
+    clearBtn.disabled = true;
+    return;
+  }
+  clearBtn.disabled = false;
+  const n = state.filtered.length;
+  let t = `${n}字 見つかりました / ${n} found`;
+  if(n > state.shown) t += `（${state.shown}字を表示中 / showing ${state.shown}）`;
+  el.textContent = t;
+}
+
+/* =====================================================================
+   Result grid (100 cards at a time) and home tiles
+   ===================================================================== */
 function buildStaticGlyph(k){
   return `<svg class="kanji-glyph" viewBox="0 0 109 109" xmlns="http://www.w3.org/2000/svg">${k.strokes.map(d=>`<path d="${d}"/>`).join('')}</svg>`;
 }
 
-function renderGrid(){
-  const grid = document.getElementById('kjGrid');
-  grid.innerHTML = "";
+function cardReadings(k){
+  const kun = k.kun.slice(0, 3).map(fmtReading).join('　') + (k.kun.length > 3 ? '…' : '');
+  const on = k.on.slice(0, 2).map(fmtReading).join('　') + (k.on.length > 2 ? '…' : '');
+  return (kun ? `<span class="rd-kun">${kun}</span>` : '') + (on ? `<span class="rd-on">${on}</span>` : '');
+}
+
+function renderGrid(append){
+  const grid = $('kjGrid');
+  const results = $('kjResults');
+  const home = $('kjHome');
+  const more = $('kjMore');
+  const cond = hasCondition();
+
+  home.style.display = cond ? 'none' : '';
+  results.classList.toggle('show', cond);
+  if(!cond){ grid.innerHTML = ''; more.innerHTML = ''; return; }
+
+  if(!append){ grid.innerHTML = ''; state.shown = 0; }
+
   if(state.filtered.length === 0){
     const msg = (state.favoritesOnly && favorites.size === 0)
-      ? 'お気に入りはまだありません。漢字のページを開いて☆マークを押すと、ここに追加されます。'
-      : '見つかりませんでした。検索語や絞り込みを変えてみてください。';
-    grid.innerHTML = `<div class="kj-empty">${msg}</div>`;
+      ? 'お気に入りはまだありません。漢字のページを開いて☆マークを押すと、ここに追加されます。<small>No favorites yet. Open a kanji and tap the star to add it here.</small>'
+      : '見つかりませんでした。検索語や絞り込みを変えてみてください。<small>Nothing found. Try another word or change the filters.</small>';
+    grid.innerHTML = `<div class="kj-empty" style="grid-column:1/-1">${msg}</div>`;
+    more.innerHTML = '';
     return;
   }
-  state.filtered.forEach(k => {
-    const card = document.createElement('div');
+
+  const from = state.shown;
+  const to = Math.min(state.filtered.length, from + PAGE_SIZE);
+  const frag = document.createDocumentFragment();
+  for(let i = from; i < to; i++){
+    const k = state.filtered[i];
+    const card = document.createElement('button');
+    card.type = 'button';
     card.className = 'kj-card';
+    card.setAttribute('aria-label', k.kanji + '　' + k.strokeCount + '画 ' + k.jlpt);
     card.innerHTML = `
-      <div class="jlpt-tag">${k.jlpt}</div>
-      <div class="stamp">${k.strokeCount}</div>
-      <div class="cell">${buildStaticGlyph(k)}</div>
-      <div class="info">
-        <div class="reading">${k.kun.join('・')}${k.on.length?'　'+k.on.join('・'):''}</div>
-        <div class="meaning-en">${k.meanings_en.slice(0,2).join(', ')}</div>
-      </div>`;
+      <span class="jlpt-tag ${jlptCls(k.jlpt)}">${esc(k.jlpt)}</span>
+      <span class="stamp" title="${k.strokeCount}画 / ${k.strokeCount} strokes">${k.strokeCount}</span>
+      <span class="cell">${buildStaticGlyph(k)}</span>
+      <span class="info">
+        <span class="reading">${cardReadings(k)}</span>
+        <span class="meaning-en">${esc(k.meanings_en.slice(0,2).join(', '))}</span>
+      </span>`;
     card.addEventListener('click', () => openModal(k));
-    grid.appendChild(card);
+    frag.appendChild(card);
+  }
+  grid.appendChild(frag);
+  state.shown = to;
+
+  const left = state.filtered.length - to;
+  more.innerHTML = '';
+  if(left > 0){
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'kj-btn solid c-green';
+    btn.innerHTML = `${icon('plus')}<span class="lb"><b>もっと見る（残り${left}字）</b><small>Show more (${left} left)</small></span>`;
+    btn.addEventListener('click', () => { renderGrid(true); renderCount(); });
+    more.appendChild(btn);
+  }
+}
+
+function renderHomeTiles(){
+  const gradeCount = {}, jlptCount = {};
+  KANJI_DATA.forEach(k => {
+    const b = gradeBucket(k.grade);
+    gradeCount[b] = (gradeCount[b] || 0) + 1;
+    jlptCount[k.jlpt] = (jlptCount[k.jlpt] || 0) + 1;
+  });
+
+  const gw = $('kjGradeTiles'); gw.innerHTML = '';
+  [1,2,3,4,5,6,8,99].forEach(g => {
+    if(!gradeCount[g]) return;
+    const t = document.createElement('button');
+    t.type = 'button'; t.className = 'kj-tile c-pink';
+    const jp = g === 8 ? '中学' : (g === 99 ? '高校〜' : '小学' + g + '年');
+    t.innerHTML = `<span class="bd">${esc(gradeLabel(g))}</span><span class="tx"><b>${jp}</b><small>${gradeEn(g)}</small><span class="n">${gradeCount[g]}字</span></span>`;
+    t.addEventListener('click', () => { state.gradeFilter = g; syncChips(); applyFilters(); scrollToFilters(); });
+    gw.appendChild(t);
+  });
+
+  const jw = $('kjJlptTiles'); jw.innerHTML = '';
+  ['N5','N4','N3','N2','N1','対象外'].forEach(l => {
+    if(!jlptCount[l]) return;
+    const t = document.createElement('button');
+    t.type = 'button'; t.className = 'kj-tile ' + jlptCls(l);
+    t.innerHTML = `<span class="bd">${l === '対象外' ? '－' : l}</span><span class="tx"><b>${l === '対象外' ? '対象外' : 'JLPT ' + l}</b><small>${JLPT_HINT[l]}</small><span class="n">${jlptCount[l]}字</span></span>`;
+    t.addEventListener('click', () => { state.jlptFilter = l; syncChips(); applyFilters(); scrollToFilters(); });
+    jw.appendChild(t);
   });
 }
 
+function scrollToFilters(){
+  const el = document.querySelector('.kj-filters');
+  if(el) el.scrollIntoView({ behavior:'smooth', block:'start' });
+}
+
+/* =====================================================================
+   Filter chips
+   ===================================================================== */
+function makeChip(label, cls, kind, value, onClick){
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'chip' + (cls ? ' ' + cls : '');
+  b.textContent = label;
+  b.dataset.kind = kind;
+  b.dataset.v = String(value);
+  b.setAttribute('aria-pressed', 'false');
+  b.addEventListener('click', onClick);
+  return b;
+}
+function syncChips(){
+  const on = { stroke:String(state.strokeFilter), jlpt:String(state.jlptFilter), grade:String(state.gradeFilter) };
+  document.querySelectorAll('.chip[data-kind]').forEach(el => {
+    const active = on[el.dataset.kind] === el.dataset.v;
+    el.classList.toggle('on', active);
+    el.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+  $('kjRadicalSelect').value = state.radicalFilter || '';
+}
 function renderStrokeChips(){
   const counts = Array.from(new Set(KANJI_DATA.map(k=>k.strokeCount))).sort((a,b)=>a-b);
-  const wrap = document.getElementById('kjStrokeChips');
+  const wrap = $('kjStrokeChips');
   counts.forEach(c => {
-    const chip = document.createElement('span');
-    chip.className = 'chip'; chip.textContent = c + '画';
-    chip.addEventListener('click', () => {
+    wrap.appendChild(makeChip(c + '画', '', 'stroke', c, () => {
       state.strokeFilter = (state.strokeFilter === c) ? null : c;
-      document.querySelectorAll('#kjStrokeChips .chip').forEach(el=>el.classList.remove('on'));
-      if(state.strokeFilter) chip.classList.add('on');
-      applyFilters();
-    });
-    wrap.appendChild(chip);
+      syncChips(); applyFilters();
+    }));
   });
 }
 function renderRadicalChips(){
-  // With 2136 kanji there are ~200 distinct radicals, too many for a chip row,
-  // so the radical filter is a searchable <select> instead.
+  // ~200 distinct radicals are too many for a chip row, so the radical filter is a <select>.
   const counts = {};
   KANJI_DATA.forEach(k => { counts[k.radical] = (counts[k.radical]||0) + 1; });
-  const rads = Array.from(new Set(KANJI_DATA.map(k=>k.radical)))
-    .sort((a,b) => a.localeCompare(b, 'ja'));
-  const select = document.getElementById('kjRadicalSelect');
+  const rads = Array.from(new Set(KANJI_DATA.map(k=>k.radical))).sort((a,b) => a.localeCompare(b, 'ja'));
+  const select = $('kjRadicalSelect');
   rads.forEach(r => {
     const k = KANJI_DATA.find(x => x.radical === r);
     const opt = document.createElement('option');
@@ -112,90 +316,159 @@ function renderRadicalChips(){
     applyFilters();
   });
 }
-
-function gradeBucket(g){
-  if(g >= 1 && g <= 6) return g;
-  if(g === 8) return 8;
-  return 99; // covers grade 9, 10 (jinmeiyou), and ungraded JIS X0208 kanji -> shown as 高校
-}
-function gradeLabel(g){
-  const b = gradeBucket(g);
-  if(b === 8) return '中学';
-  if(b === 99) return '高校';
-  return '小' + b;
-}
-
 function renderGradeChips(){
   const grades = Array.from(new Set(KANJI_DATA.map(k=>gradeBucket(k.grade)))).sort((a,b)=>a-b);
-  const wrap = document.getElementById('kjGradeChips');
+  const wrap = $('kjGradeChips');
   grades.forEach(g => {
-    const chip = document.createElement('span');
-    chip.className = 'chip'; chip.textContent = gradeLabel(g);
-    chip.addEventListener('click', () => {
+    wrap.appendChild(makeChip(gradeLabel(g), '', 'grade', g, () => {
       state.gradeFilter = (state.gradeFilter === g) ? null : g;
-      document.querySelectorAll('#kjGradeChips .chip').forEach(el=>el.classList.remove('on'));
-      if(state.gradeFilter !== null) chip.classList.add('on');
-      applyFilters();
-    });
-    wrap.appendChild(chip);
+      syncChips(); applyFilters();
+    }));
   });
 }
 function renderJlptChips(){
-  const levels = Array.from(new Set(KANJI_DATA.map(k=>k.jlpt))).sort();
-  const wrap = document.getElementById('kjJlptChips');
+  const order = ['N5','N4','N3','N2','N1','対象外'];
+  const levels = Array.from(new Set(KANJI_DATA.map(k=>k.jlpt))).sort((a,b) => order.indexOf(a) - order.indexOf(b));
+  const wrap = $('kjJlptChips');
   levels.forEach(l => {
-    const chip = document.createElement('span');
-    chip.className = 'chip'; chip.textContent = l;
-    chip.addEventListener('click', () => {
+    wrap.appendChild(makeChip(l, jlptCls(l), 'jlpt', l, () => {
       state.jlptFilter = (state.jlptFilter === l) ? null : l;
-      document.querySelectorAll('#kjJlptChips .chip').forEach(el=>el.classList.remove('on'));
-      if(state.jlptFilter) chip.classList.add('on');
-      applyFilters();
-    });
-    wrap.appendChild(chip);
+      syncChips(); applyFilters();
+    }));
   });
 }
 
-document.getElementById('kjSearchInput').addEventListener('input', e => { state.query = e.target.value; applyFilters(); });
-document.getElementById('kjClearFilters').addEventListener('click', () => {
-  state.strokeFilter=null; state.radicalFilter=null; state.jlptFilter=null; state.gradeFilter=null; state.query=""; state.favoritesOnly=false;
-  document.getElementById('kjSearchInput').value="";
-  document.getElementById('kjRadicalSelect').value="";
-  document.querySelectorAll('.chip').forEach(el=>el.classList.remove('on'));
-  document.getElementById('kjFavToggle').classList.remove('active');
-  updateFavToggleLabel();
-  applyFilters();
-});
+/* =====================================================================
+   Search box, reset, favorites, study mode, panels
+   ===================================================================== */
+let searchTimer = null;
+function onQueryChanged(immediate){
+  const inp = $('kjSearchInput');
+  state.query = inp.value;
+  $('kjSearchClear').classList.toggle('show', inp.value.length > 0);
+  clearTimeout(searchTimer);
+  if(immediate) applyFilters();
+  else searchTimer = setTimeout(applyFilters, 130);
+}
+$('kjSearchInput').addEventListener('input', () => onQueryChanged(false));
+$('kjSearchClear').addEventListener('click', () => { $('kjSearchInput').value = ''; onQueryChanged(true); $('kjSearchInput').focus(); });
 
-document.getElementById('kjHomeLink').addEventListener('click', () => {
-  state.strokeFilter=null; state.radicalFilter=null; state.jlptFilter=null; state.gradeFilter=null; state.query=""; state.favoritesOnly=false;
-  document.getElementById('kjSearchInput').value="";
-  document.getElementById('kjRadicalSelect').value="";
-  document.querySelectorAll('.chip').forEach(el=>el.classList.remove('on'));
-  document.getElementById('kjFavToggle').classList.remove('active');
+function resetAll(){
+  state.strokeFilter = null; state.radicalFilter = null; state.jlptFilter = null; state.gradeFilter = null; state.query = ""; state.favoritesOnly = false;
+  $('kjSearchInput').value = "";
+  $('kjSearchClear').classList.remove('show');
+  syncChips();
   updateFavToggleLabel();
-  document.getElementById('kjHwPanel').classList.remove('show');
-  document.getElementById('kjJukugoPanel').classList.remove('show');
-  jukugoReset();
-  if(document.getElementById('kjFullscreen').classList.contains('show')) closeFullscreen();
-  closeModal();
   applyFilters();
+}
+$('kjClearFilters').addEventListener('click', resetAll);
+
+const PANELS = [
+  { btn:'kjKanaToggle',    panel:'kjKanaPanel' },
+  { btn:'kjHwToggle',      panel:'kjHwPanel' },
+  { btn:'kjJukugoToggle',  panel:'kjJukugoPanel' }
+];
+function closePanels(exceptPanel){
+  PANELS.forEach(p => {
+    if(p.panel === exceptPanel) return;
+    $(p.panel).classList.remove('show');
+    $(p.btn).setAttribute('aria-pressed', 'false');
+  });
+}
+function togglePanel(panelId, btnId){
+  const el = $(panelId);
+  closePanels(panelId);
+  el.classList.toggle('show');
+  const open = el.classList.contains('show');
+  $(btnId).setAttribute('aria-pressed', open ? 'true' : 'false');
+  return open;
+}
+
+$('kjHomeLink').addEventListener('click', () => {
+  closePanels(null);
+  jukugoReset();
+  if($('kjFullscreen').classList.contains('show')) closeFullscreen();
+  closeModal();
+  resetAll();
   window.scrollTo({top:0, behavior:'smooth'});
 });
 
-document.getElementById('kjFavToggle').addEventListener('click', () => {
+$('kjFavToggle').addEventListener('click', () => {
   state.favoritesOnly = !state.favoritesOnly;
-  document.getElementById('kjFavToggle').classList.toggle('active', state.favoritesOnly);
   updateFavToggleLabel();
   applyFilters();
 });
 
-document.getElementById('kjStudyModeToggle').addEventListener('click', () => {
+$('kjStudyModeToggle').addEventListener('click', () => {
   studyModeActive = !studyModeActive;
-  document.getElementById('kjStudyModeToggle').classList.toggle('active', studyModeActive);
+  $('kjStudyModeToggle').setAttribute('aria-pressed', studyModeActive ? 'true' : 'false');
 });
 
-/* ================= Modal + stroke order animation ================= */
+/* =====================================================================
+   Kana keyboard (五十音表): tap letters to fill the search box
+   ===================================================================== */
+const KANA_TABS = {
+  basic: { cls:'t-basic', rows:[
+    ['あ','い','う','え','お'], ['か','き','く','け','こ'], ['さ','し','す','せ','そ'], ['た','ち','つ','て','と'], ['な','に','ぬ','ね','の'],
+    ['は','ひ','ふ','へ','ほ'], ['ま','み','む','め','も'], ['や','','ゆ','','よ'], ['ら','り','る','れ','ろ'], ['わ','','','','を'] ] },
+  voiced: { cls:'t-voiced', rows:[
+    ['が','ぎ','ぐ','げ','ご'], ['ざ','じ','ず','ぜ','ぞ'], ['だ','ぢ','づ','で','ど'], ['ば','び','ぶ','べ','ぼ'], ['ぱ','ぴ','ぷ','ぺ','ぽ'] ] },
+  contracted: { cls:'t-contracted', rows:[
+    ['きゃ','きゅ','きょ'], ['しゃ','しゅ','しょ'], ['ちゃ','ちゅ','ちょ'], ['にゃ','にゅ','にょ'], ['ひゃ','ひゅ','ひょ'], ['みゃ','みゅ','みょ'],
+    ['りゃ','りゅ','りょ'], ['ぎゃ','ぎゅ','ぎょ'], ['じゃ','じゅ','じょ'], ['びゃ','びゅ','びょ'], ['ぴゃ','ぴゅ','ぴょ'] ] }
+};
+function kanaInsert(ch){
+  const inp = $('kjSearchInput');
+  inp.value += ch;
+  onQueryChanged(true);
+}
+function kanaBackspace(){
+  const inp = $('kjSearchInput');
+  inp.value = Array.from(inp.value).slice(0, -1).join('');
+  onQueryChanged(true);
+}
+function renderKanaTab(name){
+  const def = KANA_TABS[name];
+  const box = $('kjKanaKeys');
+  box.className = 'kj-kana-keys ' + def.cls;
+  box.innerHTML = '';
+  def.rows.forEach(row => row.forEach(ch => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    if(!ch){ b.className = 'kj-key blank'; b.tabIndex = -1; b.setAttribute('aria-hidden', 'true'); }
+    else { b.className = 'kj-key'; b.textContent = ch; b.addEventListener('click', () => kanaInsert(ch)); }
+    box.appendChild(b);
+  }));
+  document.querySelectorAll('#kjKanaPanel .kj-kana-tabs button').forEach(t => t.setAttribute('aria-selected', t.dataset.tab === name ? 'true' : 'false'));
+}
+function buildKanaSpecial(){
+  const box = $('kjKanaSpecial');
+  box.innerHTML = '';
+  ['ん','っ','ー','ゃ','ゅ','ょ'].forEach(ch => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'kj-key'; b.textContent = ch;
+    b.addEventListener('click', () => kanaInsert(ch));
+    box.appendChild(b);
+  });
+  const del = document.createElement('button');
+  del.type = 'button'; del.className = 'kj-key act del';
+  del.innerHTML = `${icon('backspace')}<span>1文字消す<br><small>Delete</small></span>`;
+  del.addEventListener('click', kanaBackspace);
+  box.appendChild(del);
+  const clr = document.createElement('button');
+  clr.type = 'button'; clr.className = 'kj-key act clr';
+  clr.innerHTML = `${icon('rotate')}<span>全部消す<br><small>Clear</small></span>`;
+  clr.addEventListener('click', () => { $('kjSearchInput').value = ''; onQueryChanged(true); });
+  box.appendChild(clr);
+}
+document.querySelectorAll('#kjKanaPanel .kj-kana-tabs button').forEach(t => t.addEventListener('click', () => renderKanaTab(t.dataset.tab)));
+$('kjKanaToggle').addEventListener('click', () => { togglePanel('kjKanaPanel', 'kjKanaToggle'); });
+renderKanaTab('basic');
+buildKanaSpecial();
+
+/* =====================================================================
+   Detail modal + stroke order animation
+   ===================================================================== */
 let currentAnimSpeed = 700;
 let currentModalKanji = null;
 let modalHistory = [];
@@ -203,18 +476,18 @@ let modalHistory = [];
 function renderCompoundsList(container, k){
   container.innerHTML = '';
   if(!k.compounds || k.compounds.length === 0){
-    container.innerHTML = '<div class="none">この漢字が使われる一般的な熟語は見つかりませんでした（単独で使われることが多い漢字です）。</div>';
+    container.innerHTML = '<div class="none">この漢字が使われる一般的な熟語は見つかりませんでした（単独で使われることが多い漢字です）。<br>No common words found. This kanji is often used alone.</div>';
     return;
   }
   k.compounds.forEach(c => {
     const row = document.createElement('div');
     row.className = 'kj-compound-item';
     const wordHtml = Array.from(c.word).map(ch => {
-      if(ch === k.kanji) return `<span class="wc current">${ch}</span>`;
-      if(kanjiMap.has(ch)) return `<span class="wc link" data-kanji="${ch}">${ch}</span>`;
-      return `<span class="wc">${ch}</span>`;
+      if(ch === k.kanji) return `<span class="wc current">${esc(ch)}</span>`;
+      if(kanjiMap.has(ch)) return `<span class="wc link" data-kanji="${esc(ch)}">${esc(ch)}</span>`;
+      return `<span class="wc">${esc(ch)}</span>`;
     }).join('');
-    row.innerHTML = `<span class="word">${wordHtml}</span><span class="reading">${c.reading}</span><span class="gloss">${c.meaning_en}</span>`;
+    row.innerHTML = `<span class="word">${wordHtml}</span><span class="reading">${esc(c.reading)}</span><span class="gloss">${esc(c.meaning_en)}</span>`;
     container.appendChild(row);
   });
 }
@@ -232,6 +505,31 @@ function buildStrokeSvg(container, strokes){
   return pathEls;
 }
 
+/* The 6 information tiles (shared by the modal and the fullscreen view) */
+function infoTile(cls, ic, jp, en, valueHtml){
+  return `<div class="kj-info ${cls}"><span class="bd">${icon(ic)}</span><div class="tx"><span class="k">${jp} <small>${en}</small></span><span class="v">${valueHtml}</span></div></div>`;
+}
+function renderInfoTiles(container, k){
+  const on = k.on.length ? k.on.map(fmtReading).join('、') : '－';
+  const kun = k.kun.length ? k.kun.map(fmtReading).join('、') : '－';
+  container.innerHTML = [
+    infoTile('c-orange', 'hash', '画数', 'Strokes', `${k.strokeCount}<span class="sub"> 画</span>`),
+    infoTile('c-blue', 'grid', '部首', 'Radical', `${esc(k.radical)} <span class="sub">${esc(k.radical_meaning_en)}</span>`),
+    infoTile('c-purple', 'volume', '音読み', 'On-yomi', on),
+    infoTile('c-green', 'book', '訓読み', 'Kun-yomi', kun),
+    infoTile(jlptCls(k.jlpt), 'award', 'JLPT', 'Level', `<span class="lvl">${esc(k.jlpt)}</span>`),
+    infoTile('c-pink', 'cap', '学年', 'Grade', `${gradeLabel(k.grade)} <span class="sub">${gradeEn(k.grade)}</span>`)
+  ].join('');
+}
+function hlSentence(text, kanji){
+  return esc(text).split(esc(kanji)).join(`<span class="hl">${esc(kanji)}</span>`);
+}
+function setStarButton(btn, isFav){
+  btn.classList.toggle('active', isFav);
+  btn.setAttribute('aria-pressed', isFav ? 'true' : 'false');
+  btn.title = isFav ? 'お気に入りから削除 / Remove from favorites' : 'お気に入りに登録 / Add to favorites';
+}
+
 function openModal(k, opts){
   opts = opts || {};
   if(k.isKana){
@@ -247,55 +545,46 @@ function openModal(k, opts){
     modalHistory = [];
   }
   currentModalKanji = k;
-  const backBtn = document.getElementById('kjModalBack');
-  backBtn.style.display = modalHistory.length > 0 ? '' : 'none';
+  $('kjModalBack').style.display = modalHistory.length > 0 ? '' : 'none';
 
   const modalEl = document.querySelector('.kj-modal');
   if(modalEl) modalEl.scrollTop = 0;
-  document.getElementById('kjModalKanjiRows').style.display = '';
-  document.getElementById('kjModalKanaRow').style.display = 'none';
-  document.getElementById('kjModalExampleBox').style.display = '';
-  document.getElementById('kjModalCompoundsBox').style.display = '';
-  document.getElementById('kjModalKanjiTiny').textContent = k.kanji + '　部首：' + k.radical + '（' + k.radical_meaning_en + '）';
-  document.getElementById('kjModalJlpt').textContent = k.jlpt;
-  document.getElementById('kjModalOn').textContent = k.on.length ? k.on.join('、') : '－';
-  document.getElementById('kjModalKun').textContent = k.kun.length ? k.kun.join('、') : '－';
-  document.getElementById('kjModalMeaning').textContent = k.meanings_en.join(', ');
-  document.getElementById('kjModalMeaningEn').textContent = '学習学年：' + gradeLabel(k.grade);
-  document.getElementById('kjModalStrokeRadical').textContent = k.strokeCount + '画　／　部首：' + k.radical + '（' + k.radical_meaning_en + '）';
-  document.getElementById('kjModalExJa').textContent = k.ex_ja;
-  document.getElementById('kjModalExEn').textContent = k.ex_en;
+  $('kjModalKanjiRows').style.display = '';
+  $('kjModalKanaRow').style.display = 'none';
+  $('kjModalCompoundsBox').style.display = '';
 
-  renderCompoundsList(document.getElementById('kjModalCompounds'), k);
+  $('kjModalMeaning').textContent = k.meanings_en.join(', ');
+  renderInfoTiles($('kjModalTiles'), k);
+
+  const exBox = $('kjModalExampleBox');
+  if(k.ex_ja){
+    exBox.style.display = '';
+    $('kjModalExJa').innerHTML = hlSentence(k.ex_ja, k.kanji);
+    $('kjModalExEn').textContent = k.ex_en || '';
+  } else {
+    exBox.style.display = 'none';
+  }
+
+  renderCompoundsList($('kjModalCompounds'), k);
 
   // Show the modal BEFORE building/measuring the stroke SVG. path.getTotalLength()
-  // (used by playAnimation) can return an incorrect length — often 0, causing that
-  // stroke to snap in instead of drawing — when called on an element that's still
-  // inside a display:none ancestor. Flipping the overlay visible first, then forcing
-  // a synchronous layout flush (reading offsetHeight), guarantees the browser has a
-  // real layout to measure against before we touch getTotalLength().
-  const overlayEl = document.getElementById('kjOverlay');
+  // (used by playAnimation) can return an incorrect length — often 0 — when called on an
+  // element that's still inside a display:none ancestor. Flip the overlay visible first,
+  // then force a synchronous layout flush so the browser has a real layout to measure.
+  const overlayEl = $('kjOverlay');
   overlayEl.classList.add('show');
   void overlayEl.offsetHeight;
 
-  const stage = document.getElementById('kjStage');
-  const pathEls = buildStrokeSvg(stage, k.strokes);
-
+  const pathEls = buildStrokeSvg($('kjStage'), k.strokes);
   currentAnimSpeed = 700;
   playAnimation(pathEls);
-  document.getElementById('kjReplay').onclick = () => playAnimation(pathEls);
-  document.getElementById('kjSlow').onclick = () => { currentAnimSpeed = 1400; playAnimation(pathEls); };
-  document.getElementById('kjCopyKanji').onclick = () => copyTextToClipboard(k.kanji, document.getElementById('kjCopyKanji'));
+  $('kjReplay').onclick = () => playAnimation(pathEls);
+  $('kjSlow').onclick = () => { currentAnimSpeed = 1400; playAnimation(pathEls); };
+  $('kjCopyKanji').onclick = () => copyTextToClipboard(k.kanji, $('kjCopyKanji'));
 
-  const starBtn = document.getElementById('kjModalStar');
-  const setStarUI = () => {
-    const isFav = favorites.has(k.kanji);
-    starBtn.textContent = isFav ? '★' : '☆';
-    starBtn.classList.toggle('active', isFav);
-    starBtn.title = isFav ? 'お気に入りから削除' : 'お気に入りに登録';
-  };
-  setStarUI();
-  starBtn.onclick = () => { toggleFavorite(k.kanji); setStarUI(); };
+  const starBtn = $('kjModalStar');
+  setStarButton(starBtn, favorites.has(k.kanji));
+  starBtn.onclick = () => { toggleFavorite(k.kanji); setStarButton(starBtn, favorites.has(k.kanji)); };
 }
 
 /* Hiragana get a deliberately minimal version of the same modal: just the
@@ -307,45 +596,32 @@ function renderKanaModal(k, opts){
     modalHistory = [];
   }
   currentModalKanji = k;
-  const backBtn = document.getElementById('kjModalBack');
-  backBtn.style.display = modalHistory.length > 0 ? '' : 'none';
+  $('kjModalBack').style.display = modalHistory.length > 0 ? '' : 'none';
 
   const modalEl = document.querySelector('.kj-modal');
   if(modalEl) modalEl.scrollTop = 0;
-  document.getElementById('kjModalKanjiRows').style.display = 'none';
-  document.getElementById('kjModalKanaRow').style.display = '';
-  document.getElementById('kjModalExampleBox').style.display = 'none';
-  document.getElementById('kjModalCompoundsBox').style.display = 'none';
+  $('kjModalKanjiRows').style.display = 'none';
+  $('kjModalKanaRow').style.display = '';
+  $('kjModalExampleBox').style.display = 'none';
+  $('kjModalCompoundsBox').style.display = 'none';
+  $('kjModalKanaStroke').innerHTML = `${k.strokeCount}<span class="sub"> 画</span>`;
 
-  document.getElementById('kjModalKanjiTiny').textContent = k.kanji + '　ひらがな';
-  document.getElementById('kjModalJlpt').textContent = '';
-  document.getElementById('kjModalKanaStroke').textContent = k.strokeCount + '画';
-
-  // See the comment in openModal(): show the overlay and force a layout flush
-  // BEFORE building/measuring the stroke SVG, so getTotalLength() never runs
-  // against a still-hidden (display:none) element.
-  const overlayEl = document.getElementById('kjOverlay');
+  const overlayEl = $('kjOverlay');
   overlayEl.classList.add('show');
   void overlayEl.offsetHeight;
 
-  const stage = document.getElementById('kjStage');
-  const pathEls = buildStrokeSvg(stage, k.strokes);
+  const pathEls = buildStrokeSvg($('kjStage'), k.strokes);
   currentAnimSpeed = 700;
   playAnimation(pathEls);
-  document.getElementById('kjReplay').onclick = () => playAnimation(pathEls);
-  document.getElementById('kjSlow').onclick = () => { currentAnimSpeed = 1400; playAnimation(pathEls); };
-  document.getElementById('kjCopyKanji').onclick = () => copyTextToClipboard(k.kanji, document.getElementById('kjCopyKanji'));
+  $('kjReplay').onclick = () => playAnimation(pathEls);
+  $('kjSlow').onclick = () => { currentAnimSpeed = 1400; playAnimation(pathEls); };
+  $('kjCopyKanji').onclick = () => copyTextToClipboard(k.kanji, $('kjCopyKanji'));
 
-  const starBtn = document.getElementById('kjModalStar');
-  const setStarUI = () => {
-    const isFav = favorites.has(k.kanji);
-    starBtn.textContent = isFav ? '★' : '☆';
-    starBtn.classList.toggle('active', isFav);
-    starBtn.title = isFav ? 'お気に入りから削除' : 'お気に入りに登録';
-  };
-  setStarUI();
-  starBtn.onclick = () => { toggleFavorite(k.kanji); setStarUI(); };
+  const starBtn = $('kjModalStar');
+  setStarButton(starBtn, favorites.has(k.kanji));
+  starBtn.onclick = () => { toggleFavorite(k.kanji); setStarButton(starBtn, favorites.has(k.kanji)); };
 }
+
 function playAnimation(pathEls){
   // 1) Instantly hide every stroke (no transition yet).
   pathEls.forEach(p => {
@@ -354,12 +630,8 @@ function playAnimation(pathEls){
     p.style.strokeDasharray = len;
     p.style.strokeDashoffset = len;
   });
-  // 2) Wait two animation frames before starting the transition. A single
-  //    rAF (or getBoundingClientRect) isn't always enough to guarantee the
-  //    browser has actually painted the "hidden" state first — this matters
-  //    most the very first time a freshly-inserted SVG is animated, which is
-  //    why the first 1-2 strokes could appear to skip their draw-in. Two
-  //    rAFs reliably wait for a real paint before flipping the transition on.
+  // 2) Wait two animation frames before starting the transition so the browser has
+  //    really painted the "hidden" state first (otherwise the first strokes can skip their draw-in).
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       pathEls.forEach((p, i) => {
@@ -372,17 +644,14 @@ function playAnimation(pathEls){
 }
 
 function copyTextToClipboard(text, btn){
-  const showCopied = () => {
-    const original = btn.innerHTML;
-    btn.innerHTML = '✓ コピーしました';
-    btn.classList.add('copied');
-    setTimeout(() => { btn.innerHTML = original; btn.classList.remove('copied'); }, 1500);
+  const original = btn.innerHTML;
+  const flash = (html, cls) => {
+    btn.innerHTML = html;
+    if(cls) btn.classList.add(cls);
+    setTimeout(() => { btn.innerHTML = original; if(cls) btn.classList.remove(cls); }, 1500);
   };
-  const showFailed = () => {
-    const original = btn.innerHTML;
-    btn.innerHTML = 'コピーできませんでした';
-    setTimeout(() => { btn.innerHTML = original; }, 1500);
-  };
+  const showCopied = () => flash(`${icon('check')}<span class="lb"><b>コピーしました</b><small>Copied</small></span>`, 'copied');
+  const showFailed = () => flash(`<span class="lb"><b>コピーできませんでした</b><small>Could not copy</small></span>`, null);
 
   if(navigator.clipboard && window.isSecureContext){
     navigator.clipboard.writeText(text).then(showCopied).catch(() => fallbackCopy(text, showCopied, showFailed));
@@ -406,49 +675,68 @@ function fallbackCopy(text, onSuccess, onFail){
     onFail();
   }
 }
-document.getElementById('kjModalClose').addEventListener('click', closeModal);
-document.getElementById('kjOverlay').addEventListener('click', e => { if(e.target.id === 'kjOverlay') closeModal(); });
-document.getElementById('kjModalCompounds').addEventListener('click', e => {
+$('kjModalClose').addEventListener('click', closeModal);
+$('kjOverlay').addEventListener('click', e => { if(e.target.id === 'kjOverlay') closeModal(); });
+$('kjModalCompounds').addEventListener('click', e => {
   const el = e.target.closest('.wc.link');
   if(!el) return;
-  const ch = el.dataset.kanji;
-  const entry = kanjiMap.get(ch);
+  const entry = kanjiMap.get(el.dataset.kanji);
   if(entry){
     if(currentModalKanji) modalHistory.push(currentModalKanji);
     openModal(entry, {fromHistory:true});
   }
 });
-document.getElementById('kjModalBack').addEventListener('click', () => {
+$('kjModalBack').addEventListener('click', () => {
   const prev = modalHistory.pop();
   if(prev) openModal(prev, {fromHistory:true});
 });
-function closeModal(){ document.getElementById('kjOverlay').classList.remove('show'); }
+function closeModal(){ $('kjOverlay').classList.remove('show'); }
 document.addEventListener('keydown', e => {
   if(e.key !== 'Escape') return;
-  if(document.getElementById('kjFullscreen').classList.contains('show')) closeFullscreen();
+  if($('kjFullscreen').classList.contains('show')) closeFullscreen();
   else closeModal();
 });
 
-/* ================= Fullscreen Lesson Mode ================= */
+/* =====================================================================
+   Fullscreen lesson mode (with A− / A＋ text size)
+   ===================================================================== */
 let fsCurrentKanji = null;
 let fsMode = 'normal'; // 'normal' | 'reading' | 'writing'
 let fsSelectedWord = null;
 let fsRevealed = false;
 
+const FS_SCALE_KEY = 'hitsujun-fs-scale';
+let fsScale = 1;
+try{ const v = parseFloat(localStorage.getItem(FS_SCALE_KEY)); if(v >= 0.8 && v <= 1.6) fsScale = v; } catch(e){ /* ignore */ }
+function applyFsScale(){
+  fsScale = Math.round(fsScale * 10) / 10;
+  $('kjFullscreen').style.setProperty('--s', fsScale);
+  $('kjFsSizeOut').textContent = Math.round(fsScale * 100) + '%';
+  $('kjFsSmaller').disabled = fsScale <= 0.8;
+  $('kjFsLarger').disabled = fsScale >= 1.6;
+  try{ localStorage.setItem(FS_SCALE_KEY, String(fsScale)); } catch(e){ /* ignore */ }
+}
+$('kjFsSmaller').addEventListener('click', () => { fsScale -= 0.1; applyFsScale(); });
+$('kjFsLarger').addEventListener('click', () => { fsScale += 0.1; applyFsScale(); });
+applyFsScale();
+
+function setFsMode(mode){
+  fsMode = mode;
+  $('kjFullscreen').dataset.mode = mode;
+  document.querySelectorAll('.kj-fs-modebtn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+}
+
 function openFullscreen(k){
   fsCurrentKanji = k;
-  fsMode = 'normal';
   fsSelectedWord = null;
   fsRevealed = false;
-  document.querySelectorAll('.kj-fs-modebtn').forEach(b => b.classList.toggle('active', b.dataset.mode === 'normal'));
-  document.getElementById('kjFsNormal').style.display = 'flex';
-  document.getElementById('kjFsStudyView').style.display = 'none';
+  setFsMode('normal');
+  $('kjFsNormal').style.display = 'flex';
+  $('kjFsStudyView').style.display = 'none';
   document.body.style.overflow = 'hidden';
 
-  // Same fix as openModal(): show the fullscreen panel and force a layout flush
-  // BEFORE renderFsNormal builds/measures the stroke SVG, so getTotalLength()
-  // never runs against a still-hidden (display:none) element.
-  const fsEl = document.getElementById('kjFullscreen');
+  // Show the fullscreen panel and force a layout flush BEFORE renderFsNormal builds/measures the stroke SVG.
+  const fsEl = $('kjFullscreen');
   fsEl.classList.add('show');
   void fsEl.offsetHeight;
 
@@ -456,48 +744,41 @@ function openFullscreen(k){
 }
 
 function closeFullscreen(){
-  document.getElementById('kjFullscreen').classList.remove('show');
+  $('kjFullscreen').classList.remove('show');
   document.body.style.overflow = '';
 }
 
-document.getElementById('kjFsClose').addEventListener('click', closeFullscreen);
+$('kjFsClose').addEventListener('click', closeFullscreen);
 
 function renderFsNormal(k){
-  document.getElementById('kjFsKanjiSmall').textContent = k.kanji + '　部首：' + k.radical + '（' + k.radical_meaning_en + '）';
-  document.getElementById('kjFsJlpt').textContent = k.jlpt;
-  document.getElementById('kjFsOn').textContent = k.on.length ? k.on.join('、') : '－';
-  document.getElementById('kjFsKun').textContent = k.kun.length ? k.kun.join('、') : '－';
-  document.getElementById('kjFsMeaning').textContent = k.meanings_en.join(', ');
-  document.getElementById('kjFsStrokeRadical').textContent = k.strokeCount + '画　／　部首：' + k.radical + '（' + k.radical_meaning_en + '）　／　' + gradeLabel(k.grade);
+  $('kjFsMeaning').textContent = k.meanings_en.join(', ');
+  renderInfoTiles($('kjFsTiles'), k);
 
-  const exBox = document.getElementById('kjFsExample');
+  const exBox = $('kjFsExample');
   if(k.ex_ja){
     exBox.style.display = '';
-    exBox.innerHTML = `<div>${k.ex_ja}</div><div class="en">${k.ex_en}</div>`;
+    $('kjFsExJa').innerHTML = hlSentence(k.ex_ja, k.kanji);
+    $('kjFsExEn').textContent = k.ex_en || '';
   } else {
     exBox.style.display = 'none';
   }
 
-  renderCompoundsList(document.getElementById('kjFsCompoundsList'), k);
+  renderCompoundsList($('kjFsCompoundsList'), k);
 
-  const pathEls = buildStrokeSvg(document.getElementById('kjFsStage'), k.strokes);
+  const pathEls = buildStrokeSvg($('kjFsStage'), k.strokes);
   currentAnimSpeed = 700;
   playAnimation(pathEls);
-  document.getElementById('kjFsReplay').onclick = () => playAnimation(pathEls);
-  document.getElementById('kjFsSlow').onclick = () => { currentAnimSpeed = 1400; playAnimation(pathEls); };
-  document.getElementById('kjFsCopy').onclick = () => copyTextToClipboard(k.kanji, document.getElementById('kjFsCopy'));
+  $('kjFsReplay').onclick = () => playAnimation(pathEls);
+  $('kjFsSlow').onclick = () => { currentAnimSpeed = 1400; playAnimation(pathEls); };
+  $('kjFsCopy').onclick = () => copyTextToClipboard(k.kanji, $('kjFsCopy'));
 
-  const starBtn = document.getElementById('kjFsStar');
-  const setFsStarUI = () => {
-    const isFav = favorites.has(k.kanji);
-    starBtn.textContent = isFav ? '★' : '☆';
-    starBtn.classList.toggle('active', isFav);
-  };
+  const starBtn = $('kjFsStar');
+  const setFsStarUI = () => starBtn.setAttribute('aria-pressed', favorites.has(k.kanji) ? 'true' : 'false');
   setFsStarUI();
   starBtn.onclick = () => { toggleFavorite(k.kanji); setFsStarUI(); };
 }
 
-document.getElementById('kjFsCompoundsList').addEventListener('click', e => {
+$('kjFsCompoundsList').addEventListener('click', e => {
   const el = e.target.closest('.wc.link');
   if(!el) return;
   const entry = kanjiMap.get(el.dataset.kanji);
@@ -506,14 +787,13 @@ document.getElementById('kjFsCompoundsList').addEventListener('click', e => {
 
 document.querySelectorAll('.kj-fs-modebtn').forEach(btn => {
   btn.addEventListener('click', () => {
-    fsMode = btn.dataset.mode;
-    document.querySelectorAll('.kj-fs-modebtn').forEach(b => b.classList.toggle('active', b === btn));
+    setFsMode(btn.dataset.mode);
     if(fsMode === 'normal'){
-      document.getElementById('kjFsNormal').style.display = 'flex';
-      document.getElementById('kjFsStudyView').style.display = 'none';
+      $('kjFsNormal').style.display = 'flex';
+      $('kjFsStudyView').style.display = 'none';
     } else {
-      document.getElementById('kjFsNormal').style.display = 'none';
-      document.getElementById('kjFsStudyView').style.display = 'flex';
+      $('kjFsNormal').style.display = 'none';
+      $('kjFsStudyView').style.display = 'flex';
       fsSelectedWord = null;
       fsRevealed = false;
       renderFsWordList();
@@ -523,18 +803,19 @@ document.querySelectorAll('.kj-fs-modebtn').forEach(btn => {
 });
 
 function renderFsWordList(){
-  const box = document.getElementById('kjFsWordList');
+  const box = $('kjFsWordList');
   box.innerHTML = '';
   const words = (fsCurrentKanji && fsCurrentKanji.study_words) || [];
   if(words.length === 0){
-    box.innerHTML = '<div class="kj-fs-empty">この漢字には学習用の言葉が見つかりませんでした。</div>';
+    box.innerHTML = '<div class="kj-fs-empty">この漢字には学習用の言葉が見つかりませんでした。<br>No study words for this kanji.</div>';
     return;
   }
   words.forEach(w => {
-    const chip = document.createElement('div');
+    const chip = document.createElement('button');
+    chip.type = 'button';
     chip.className = 'kj-fs-word-chip' + (fsSelectedWord === w ? ' selected' : '');
     const cardLabel = fsMode === 'writing' ? w.reading : w.word;
-    chip.innerHTML = `${cardLabel}<span class="tag">${w.type === 'kun' ? '訓読み' : '熟語'}</span>`;
+    chip.innerHTML = `${esc(cardLabel)}<span class="tag">${w.type === 'kun' ? '訓読み / Kun-yomi' : '熟語 / Word'}</span>`;
     chip.addEventListener('click', () => {
       fsSelectedWord = w;
       fsRevealed = false;
@@ -549,17 +830,17 @@ const FONT_KANJI = "'Klee One', sans-serif";
 const FONT_KANA = "'Klee One', sans-serif";
 
 function renderFsStage(){
-  const back = document.getElementById('kjFsBack');
-  const front = document.getElementById('kjFsFront');
-  const meaning = document.getElementById('kjFsWordMeaning');
-  const stage = document.getElementById('kjFsStage2');
+  const back = $('kjFsBack');
+  const front = $('kjFsFront');
+  const meaning = $('kjFsWordMeaning');
+  const stage = $('kjFsStage2');
 
   if(!fsSelectedWord){
     front.textContent = '言葉を選んでください';
     front.style.fontFamily = FONT_KANA;
-    front.style.fontSize = '48px';
+    front.style.fontSize = 'calc(48px * var(--s))';
     back.textContent = '';
-    meaning.textContent = '';
+    meaning.textContent = 'Choose a word below';
     stage.onclick = null;
     return;
   }
@@ -568,20 +849,20 @@ function renderFsStage(){
   meaning.textContent = w.meaning_en;
 
   if(fsMode === 'reading'){
-    // kanji word always shown big (kanji font); reading revealed on click, above, at ~1/4 size (kana font)
+    // kanji word always shown big; reading revealed on click, above, at ~1/4 size
     front.textContent = w.word;
     front.style.fontFamily = FONT_KANJI;
-    front.style.fontSize = 'min(18vw, 22vh, 200px)';
+    front.style.fontSize = 'calc(min(18vw, 22vh, 200px) * var(--s))';
     back.style.fontFamily = FONT_KANA;
-    back.style.fontSize = 'min(4.5vw, 5.5vh, 50px)';
+    back.style.fontSize = 'calc(min(4.5vw, 5.5vh, 50px) * var(--s))';
     back.textContent = fsRevealed ? w.reading : '';
   } else {
-    // writing mode: reading always shown (kana font); kanji revealed on click, above, prominently (kanji font)
+    // writing mode: reading always shown; kanji revealed on click, above, prominently
     front.textContent = w.reading;
     front.style.fontFamily = FONT_KANA;
-    front.style.fontSize = 'min(11vw, 13vh, 110px)';
+    front.style.fontSize = 'calc(min(11vw, 13vh, 110px) * var(--s))';
     back.style.fontFamily = FONT_KANJI;
-    back.style.fontSize = 'min(18vw, 22vh, 200px)';
+    back.style.fontSize = 'calc(min(18vw, 22vh, 200px) * var(--s))';
     back.textContent = fsRevealed ? w.word : '';
   }
 
@@ -617,14 +898,14 @@ async function loadDaKanjiModel(){
   if(dakanjiModel) return dakanjiModel;
   if(dakanjiLoading) return dakanjiLoading;
   dakanjiLoading = (async () => {
-    setHwStatus('認識モデルを読み込み中…（初回のみ、数MB〜数十MB通信します）', true);
+    setHwStatus('認識モデルを読み込み中…（初回のみ、通信します） / Loading the AI model (first time only)…', true);
     const [model, labels] = await Promise.all([
       tf.loadGraphModel('./model/model.json'),
       fetch('./model/labels.json').then(r => r.json())
     ]);
     dakanjiModel = model;
     DAKANJI_LABELS = labels;
-    setHwStatus('モデルの読み込み完了。書いて「認識する」を押してください。', false);
+    setHwStatus('読み込み完了。書いて「認識する」を押してください。 / Ready. Write, then press Recognize.', false);
     return model;
   })();
   return dakanjiLoading;
@@ -809,7 +1090,7 @@ function createDrawPad(canvas, wrapEl){
   canvas.width = rect.width * ratio; canvas.height = rect.height * ratio;
   const ctx = canvas.getContext('2d');
   ctx.scale(ratio, ratio);
-  ctx.strokeStyle = '#211C15'; ctx.lineWidth = 4; ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.strokeStyle = '#1F2A22'; ctx.lineWidth = 4; ctx.lineCap='round'; ctx.lineJoin='round';
 
   let strokes = [];
   let current = null;
@@ -835,57 +1116,58 @@ function createDrawPad(canvas, wrapEl){
   };
 }
 
+
 /* ---- handwriting pad UI (single-kanji lookup) ---- */
-const hwToggle = document.getElementById('kjHwToggle');
-const hwPanel = document.getElementById('kjHwPanel');
+const hwToggle = $('kjHwToggle');
+const hwPanel = $('kjHwPanel');
 let hwModelPreloadStarted = false;
 let hwPad = null;
 hwToggle.addEventListener('click', () => {
-  hwPanel.classList.toggle('show');
-  if(hwPanel.classList.contains('show')){
-    hwPad = createDrawPad(document.getElementById('kjHwCanvas'), document.querySelector('.kj-hw-canvas-wrap'));
+  const open = togglePanel('kjHwPanel', 'kjHwToggle');
+  if(open){
+    hwPad = createDrawPad($('kjHwCanvas'), document.querySelector('.kj-hw-canvas-wrap'));
     if(!hwModelPreloadStarted){
       hwModelPreloadStarted = true;
       loadDaKanjiModel().catch(err => {
         console.error(err);
-        setHwStatus('モデルの読み込みに失敗しました（通信環境をご確認ください）。', false);
+        setHwStatus('モデルの読み込みに失敗しました（通信環境をご確認ください）。 / Could not load the model. Please check your connection.', false);
       });
       loadKanjiCanvasRefPatterns().catch(err => console.error(err));
     }
   }
 });
 
-document.getElementById('kjHwClear').onclick = () => {
+$('kjHwClear').onclick = () => {
   if(hwPad) hwPad.clear();
   setHwStatus('', false);
-  document.getElementById('kjHwResults').innerHTML = '';
+  $('kjHwResults').innerHTML = '';
 };
 
-document.getElementById('kjHwRecognize').onclick = async () => {
+$('kjHwRecognize').onclick = async () => {
   const strokes = hwPad ? hwPad.getStrokes() : [];
   if(strokes.length === 0){
-    setHwStatus('まず枠の中に書いてください。', false);
+    setHwStatus('まず枠の中に書いてください。 / Please write inside the box first.', false);
     return;
   }
-  setHwStatus('認識しています…', true);
-  document.getElementById('kjHwRecognize').disabled = true;
+  setHwStatus('認識しています… / Recognizing…', true);
+  $('kjHwRecognize').disabled = true;
   try{
     const results = await recognizeCombined(strokes, hwPad.width, hwPad.height);
-    setHwStatus('候補を表示しました（左ほど自信度が高い）', false);
-    const box = document.getElementById('kjHwResults');
+    setHwStatus('候補を表示しました（左ほど自信度が高い） / Results shown (most likely on the left)', false);
+    const box = $('kjHwResults');
     renderCandidateBox(box, results, openModal);
     if(!results.some(r => kanjiMap.has(r.char))){
       const note = document.createElement('div');
       note.className = 'kj-hw-note';
       note.style.flexBasis = '100%';
-      note.textContent = '認識モデル自体はこの文字を含む6500字以上を識別できますが、収録されている常用漢字・ひらがなの範囲外（人名や旧字体など）の可能性があります。';
+      note.textContent = '認識モデル自体はこの文字を含む6500字以上を識別できますが、収録されている常用漢字・ひらがなの範囲外（人名や旧字体など）の可能性があります。 / This character may be outside the kanji in this dictionary (for example names or old forms).';
       box.appendChild(note);
     }
   } catch(err){
     console.error(err);
-    setHwStatus('認識中にエラーが発生しました。', false);
+    setHwStatus('認識中にエラーが発生しました。 / An error happened.', false);
   } finally {
-    document.getElementById('kjHwRecognize').disabled = false;
+    $('kjHwRecognize').disabled = false;
   }
 };
 
@@ -936,11 +1218,11 @@ async function jukugoLookup(word){
   document.getElementById('kjJukugoBuild').style.display = 'none';
   const resultBox = document.getElementById('kjJukugoResultBox');
   resultBox.style.display = 'block';
-  resultBox.innerHTML = '<div class="notfound-msg">調べています…</div>';
+  resultBox.innerHTML = '<div class="notfound-msg">調べています…（初回は時間がかかります） / Searching… (the first time can take a while)</div>';
 
   const index = await loadCompoundsIndex().catch(() => null);
   if(!index){
-    resultBox.innerHTML = '<div class="notfound-msg">熟語データの読み込みに失敗しました。通信環境をご確認のうえ、もう一度お試しください。</div>';
+    resultBox.innerHTML = '<div class="notfound-msg">熟語データの読み込みに失敗しました。通信環境をご確認のうえ、もう一度お試しください。<br>Could not load the word data. Please check your connection and try again.</div>';
     return;
   }
 
@@ -951,15 +1233,15 @@ async function jukugoLookup(word){
       <div class="reading">${e.reading}</div>
       <div class="gloss">${e.meaning_en}</div>
     `).join('<div style="height:14px"></div>') + `
-      <button class="kj-btn ghost" id="kjJukugoAgain" style="margin-top:8px;height:34px;padding:0 12px;font-size:12px;">別の言葉を調べる</button>
+      <button class="kj-btn sm c-gray" id="kjJukugoAgain" type="button" style="margin-top:8px;"><svg class="ic"><use href="#i-rotate"/></svg><span class="lb"><b>別の言葉を調べる</b><small>Look up another word</small></span></button>
     `;
   } else {
     resultBox.innerHTML = `
-      <div class="notfound-msg">「${word}」は現在のデータベースには見つかりませんでした。下のボタンでコピーして、他の辞書で調べることができます。</div>
-      <div class="notfound-word">${word}</div>
+      <div class="notfound-msg">「${esc(word)}」は現在のデータベースには見つかりませんでした。下のボタンでコピーして、他の辞書で調べることができます。<br>“${esc(word)}” was not found. You can copy it with the button below and look it up in another dictionary.</div>
+      <div class="notfound-word">${esc(word)}</div>
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
-        <button class="kj-btn" id="kjJukugoCopy">⧉ この言葉をコピー</button>
-        <button class="kj-btn ghost" id="kjJukugoAgain">別の言葉を調べる</button>
+        <button class="kj-btn c-blue" id="kjJukugoCopy" type="button"><svg class="ic"><use href="#i-copy"/></svg><span class="lb"><b>この言葉をコピー</b><small>Copy this word</small></span></button>
+        <button class="kj-btn c-gray" id="kjJukugoAgain" type="button"><svg class="ic"><use href="#i-rotate"/></svg><span class="lb"><b>別の言葉を調べる</b><small>Look up another word</small></span></button>
       </div>
     `;
     document.getElementById('kjJukugoCopy').onclick = () => copyTextToClipboard(word, document.getElementById('kjJukugoCopy'));
@@ -971,13 +1253,13 @@ async function jukugoLookup(word){
 function jukugoStartCount(n){
   jukugoState.totalChars = n;
   jukugoState.chars = [];
-  document.querySelectorAll('#kjJukugoCountBox .kj-btn').forEach(b => b.classList.toggle('active', Number(b.dataset.n) === n));
+  document.querySelectorAll('#kjJukugoCountBox .kj-btn').forEach(b => b.classList.toggle('on', Number(b.dataset.n) === n));
   document.getElementById('kjJukugoResultBox').style.display = 'none';
   document.getElementById('kjJukugoBuild').style.display = 'block';
   renderJukugoProgress();
   jukugoState.pad = createDrawPad(document.getElementById('kjJukugoCanvas'), document.querySelector('#kjJukugoBuild .kj-jk-canvas-wrap'));
   document.getElementById('kjJukugoResults').innerHTML = '';
-  setJukugoStatus('1文字目を書いてください。', false);
+  setJukugoStatus('1文字目を書いてください。 / Write letter 1.', false);
   loadDaKanjiModel().catch(()=>{});
   loadKanjiCanvasRefPatterns().catch(()=>{});
 }
@@ -992,7 +1274,7 @@ function jukugoPickChar(kanjiChar){
     const word = jukugoState.chars.join('');
     jukugoLookup(word);
   } else {
-    setJukugoStatus((jukugoState.chars.length+1) + '文字目を書いてください。', false);
+    setJukugoStatus((jukugoState.chars.length+1) + '文字目を書いてください。 / Write letter ' + (jukugoState.chars.length+1) + '.', false);
   }
 }
 
@@ -1000,7 +1282,7 @@ function jukugoReset(){
   jukugoState.totalChars = null;
   jukugoState.chars = [];
   jukugoState.pad = null;
-  document.querySelectorAll('#kjJukugoCountBox .kj-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('#kjJukugoCountBox .kj-btn').forEach(b => b.classList.remove('on'));
   document.getElementById('kjJukugoBuild').style.display = 'none';
   document.getElementById('kjJukugoResultBox').style.display = 'none';
   document.getElementById('kjJukugoResultBox').innerHTML = '';
@@ -1010,8 +1292,8 @@ function jukugoReset(){
 const jukugoToggle = document.getElementById('kjJukugoToggle');
 const jukugoPanel = document.getElementById('kjJukugoPanel');
 jukugoToggle.addEventListener('click', () => {
-  jukugoPanel.classList.toggle('show');
-  if(jukugoPanel.classList.contains('show')){
+  const open = togglePanel('kjJukugoPanel', 'kjJukugoToggle');
+  if(open){
     loadCompoundsIndex().catch(()=>{});
   }
 });
@@ -1031,19 +1313,19 @@ document.getElementById('kjJukugoClear').addEventListener('click', () => {
 document.getElementById('kjJukugoRecognize').addEventListener('click', async () => {
   const strokes = jukugoState.pad ? jukugoState.pad.getStrokes() : [];
   if(strokes.length === 0){
-    setJukugoStatus('まず枠の中に書いてください。', false);
+    setJukugoStatus('まず枠の中に書いてください。 / Please write inside the box first.', false);
     return;
   }
-  setJukugoStatus('認識しています…', true);
+  setJukugoStatus('認識しています… / Recognizing…', true);
   document.getElementById('kjJukugoRecognize').disabled = true;
   try{
     const results = await recognizeCombined(strokes, jukugoState.pad.width, jukugoState.pad.height);
-    setJukugoStatus('候補を表示しました（左ほど自信度が高い）', false);
+    setJukugoStatus('候補を表示しました（左ほど自信度が高い） / Results shown (most likely on the left)', false);
     const box = document.getElementById('kjJukugoResults');
     renderCandidateBox(box, results, match => jukugoPickChar(match.kanji));
   } catch(err){
     console.error(err);
-    setJukugoStatus('認識中にエラーが発生しました。', false);
+    setJukugoStatus('認識中にエラーが発生しました。 / An error happened.', false);
   } finally {
     document.getElementById('kjJukugoRecognize').disabled = false;
   }
@@ -1068,17 +1350,19 @@ document.getElementById('kjJukugoInput').addEventListener('keydown', e => {
 });
 
 async function boot(){
-  const grid = document.getElementById('kjGrid');
-  grid.innerHTML = `<div class="kj-empty">辞書データを読み込み中…</div>`;
+  const grid = $('kjGrid');
+  // Show a loading message first (the home tiles stay hidden until the data is ready)
+  $('kjHome').style.display = 'none';
+  $('kjResults').classList.add('show');
+  grid.innerHTML = `<div class="kj-empty" style="grid-column:1/-1">辞書データを読み込み中…<small>Loading the dictionary…</small></div>`;
   try{
     const res = await fetch('./data/kanji-data.json');
     KANJI_DATA = await res.json();
   } catch(err){
     console.error(err);
-    grid.innerHTML = `<div class="kj-empty">辞書データの読み込みに失敗しました。data/kanji-data.json が index.html と同じ階層構造で置かれているかご確認ください。</div>`;
+    grid.innerHTML = `<div class="kj-empty" style="grid-column:1/-1">辞書データの読み込みに失敗しました。data/kanji-data.json が index.html と同じ階層構造で置かれているかご確認ください。<small>Could not load the dictionary data.</small></div>`;
     return;
   }
-  state.filtered = KANJI_DATA.slice();
   kanjiMap = new Map(KANJI_DATA.map(k => [k.kanji, k]));
 
   // Hiragana: loaded separately (much smaller dataset, stroke order only) and merged
@@ -1099,7 +1383,8 @@ async function boot(){
   renderRadicalChips();
   renderJlptChips();
   renderGradeChips();
-  renderGrid();
-  renderCount();
+  renderHomeTiles();
+  syncChips();
+  applyFilters(); // no condition yet -> shows the home tiles, not the kanji list
 }
 boot();
