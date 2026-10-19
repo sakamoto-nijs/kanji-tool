@@ -1,381 +1,552 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="ja" translate="no">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="google" content="notranslate">
 <title>筆順 -hitsujun- 漢字の書き順辞典</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;600;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=Klee+One:wght@400;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Klee+One:wght@400;600&family=Zen+Maru+Gothic:wght@400;500;700;900&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tensorflow/4.22.0/tf.min.js"></script>
 <script src="./model/kanjicanvas/kanji-canvas.min.js"></script>
 <style>
+  /* =====================================================================
+     Design tokens (same palette as the 漢字授業サイト)
+     Each colour has 4 values: main / soft (background) / bd (border) / on (text on main)
+     ===================================================================== */
   :root{
-    --paper:#F7F1E3;
-    --paper-deep:#EEE4CC;
-    --paper-card:#FBF7EC;
-    --ink:#211C15;
-    --ink-soft:#6B6152;
-    --ink-faint:#9C927E;
-    --vermillion:#BD3B32;
-    --vermillion-deep:#8F2A25;
-    --indigo:#2E4057;
-    --green:#3F6B4F;
-    --grid-line:#C9BFA4;
-    --grid-line-soft:#DED4B9;
-    --hairline:#D9CFB4;
-    --shadow: 0 2px 0 rgba(33,28,21,0.08);
+    color-scheme: light;
+    --bg:#E7FFE7; --surface:#F8FFF8; --ink:#1F2A22; --ink-soft:#4C5D50; --faint:#86978A; --line:#BEE3BE;
+    --shadow:0 3px 0 rgba(31,42,34,.10);
+    --red:#B91C1C;    --red-soft:#FEE2E2;    --red-bd:#FECACA;    --red-on:#FFFFFF;
+    --orange:#C2410C; --orange-soft:#FFEDD5; --orange-bd:#FED7AA; --orange-on:#FFFFFF;
+    --yellow:#FACC15; --yellow-soft:#FEF9C3; --yellow-bd:#FEF08A; --yellow-on:#0F172A; --yellow-ink:#713F12;
+    --green:#15803D;  --green-soft:#DCFCE7;  --green-bd:#BBF7D0;  --green-on:#FFFFFF;
+    --teal:#0F766E;   --teal-soft:#CCFBF1;   --teal-bd:#99F6E4;   --teal-on:#FFFFFF;
+    --blue:#1D4ED8;   --blue-soft:#DBEAFE;   --blue-bd:#BFDBFE;   --blue-on:#FFFFFF;
+    --purple:#7E22CE; --purple-soft:#F3E8FF; --purple-bd:#E9D5FF; --purple-on:#FFFFFF;
+    --pink:#BE185D;   --pink-soft:#FCE7F3;   --pink-bd:#FBCFE8;   --pink-on:#FFFFFF;
+    --gray:#4B5563;   --gray-soft:#EEF2EE;   --gray-bd:#D1D9D1;   --gray-on:#FFFFFF;
+    --stroke-bg:#FFFFE1;
+    --hl:#FFE066;
+    --font-kl:'Klee One','Hiragino Maru Gothic ProN','Yu Gothic',sans-serif;
+    --font-ui:'Zen Maru Gothic','Hiragino Maru Gothic ProN','Yu Gothic',sans-serif;
   }
+
+  /* Colour helper classes: set --c (main) --cs (soft) --cb (border) --co (text on main) */
+  .c-red{--c:var(--red);--cs:var(--red-soft);--cb:var(--red-bd);--co:var(--red-on);--cc:var(--red)}
+  .c-orange{--c:var(--orange);--cs:var(--orange-soft);--cb:var(--orange-bd);--co:var(--orange-on);--cc:var(--orange)}
+  .c-yellow{--c:var(--yellow);--cs:var(--yellow-soft);--cb:var(--yellow-bd);--co:var(--yellow-on);--cc:var(--yellow-ink)}
+  .c-green{--c:var(--green);--cs:var(--green-soft);--cb:var(--green-bd);--co:var(--green-on);--cc:var(--green)}
+  .c-teal{--c:var(--teal);--cs:var(--teal-soft);--cb:var(--teal-bd);--co:var(--teal-on);--cc:var(--teal)}
+  .c-blue{--c:var(--blue);--cs:var(--blue-soft);--cb:var(--blue-bd);--co:var(--blue-on);--cc:var(--blue)}
+  .c-purple{--c:var(--purple);--cs:var(--purple-soft);--cb:var(--purple-bd);--co:var(--purple-on);--cc:var(--purple)}
+  .c-pink{--c:var(--pink);--cs:var(--pink-soft);--cb:var(--pink-bd);--co:var(--pink-on);--cc:var(--pink)}
+  .c-gray{--c:var(--gray);--cs:var(--gray-soft);--cb:var(--gray-bd);--co:var(--gray-on);--cc:var(--gray)}
+
   *{box-sizing:border-box;}
   html,body{margin:0;padding:0;}
-  body{ background-color:var(--paper); color:var(--ink); font-family:'Zen Kaku Gothic New', sans-serif; -webkit-font-smoothing:antialiased; }
-  .kj-root{ max-width:1040px; margin:0 auto; padding:28px 20px 80px; }
+  body{ background:var(--bg); color:var(--ink); font-family:var(--font-ui); -webkit-font-smoothing:antialiased; line-height:1.5; }
+  button,select,input{ font:inherit; color:inherit; }
+  button{ cursor:pointer; }
+  :focus-visible{ outline:3px solid var(--ink); outline-offset:2px; }
+  .ic{ width:1.2em; height:1.2em; flex:none; fill:none; stroke:currentColor; stroke-width:2.2; stroke-linecap:round; stroke-linejoin:round; }
+  .sr-only{ position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
 
-  .kj-header{ display:flex; align-items:flex-end; justify-content:space-between; gap:16px; border-bottom:2px solid var(--ink); padding-bottom:14px; margin-bottom:22px; flex-wrap:wrap; }
-  .kj-brand{ display:flex; align-items:baseline; gap:14px; }
-  .kj-brand .mark{ font-family:'Shippori Mincho', serif; font-weight:800; font-size:38px; line-height:1; letter-spacing:0.02em; }
-  .kj-brand .mark .accent{ color:var(--vermillion); }
-  .kj-brand .sub{ font-size:12px; color:var(--ink-soft); letter-spacing:0.12em; }
-  .kj-tagline{ font-size:12.5px; color:var(--ink-soft); max-width:280px; text-align:right; line-height:1.6; }
+  .kj-root{ max-width:1080px; margin:0 auto; padding:18px max(16px,env(safe-area-inset-right,0px)) 70px max(16px,env(safe-area-inset-left,0px)); }
 
-  .kj-controls{ display:flex; flex-direction:column; gap:14px; margin-bottom:22px; }
+  /* ---------- Header ---------- */
+  .kj-header{ position:relative; overflow:hidden; border:4px solid rgba(255,255,255,.75); border-radius:28px; box-shadow:var(--shadow);
+    background:linear-gradient(135deg,#DCFCE7 0%,#CCFBF1 55%,#FEF9C3 100%); margin-bottom:18px; }
+  .kj-header .decor{ position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+  .kj-header-in{ position:relative; display:flex; align-items:center; justify-content:space-between; gap:12px 24px; flex-wrap:wrap; padding:20px 26px; }
+  .kj-brand{ display:flex; align-items:center; gap:14px; cursor:pointer; background:none; border:0; padding:0; text-align:left; }
+  .kj-brand .mark{ font-family:var(--font-kl); font-weight:600; font-size:2.7rem; line-height:1; letter-spacing:.02em; color:#1F2A22; }
+  .kj-brand .mark .accent{ color:var(--red); }
+  .kj-brand .sub{ font-size:.82rem; font-weight:700; color:#33443A; line-height:1.35; }
+  .kj-tagline{ font-size:.85rem; font-weight:700; color:#33443A; max-width:360px; line-height:1.6; }
+  .kj-tagline small{ display:block; font-weight:500; font-size:.76rem; }
+
+  /* ---------- Buttons ---------- */
+  .kj-btn{ display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:48px; padding:6px 18px; border-radius:999px;
+    background:var(--cs,#fff); color:var(--cc,var(--ink)); border:2px solid var(--c,var(--ink)); font-weight:900; font-size:.95rem; line-height:1.15; text-align:left;
+    box-shadow:var(--shadow); transition:transform .15s, background .15s, color .15s; }
+  .kj-btn:hover:not(:disabled){ transform:translateY(-2px); background:var(--c,var(--ink)); color:var(--co,#fff); }
+  .kj-btn:active:not(:disabled){ transform:translateY(1px); }
+  .kj-btn.on, .kj-btn[aria-pressed="true"]{ background:var(--c); color:var(--co); }
+  .kj-btn:disabled{ opacity:.45; cursor:not-allowed; }
+  .kj-btn .ic{ width:1.35em; height:1.35em; }
+  .kj-btn .lb{ display:flex; flex-direction:column; }
+  .kj-btn .lb small{ font-size:.68rem; font-weight:700; opacity:.9; letter-spacing:.01em; }
+  .kj-btn.solid{ background:var(--c); color:var(--co); }
+  .kj-btn.solid:hover:not(:disabled){ filter:brightness(1.12); background:var(--c); color:var(--co); }
+  .kj-btn.sm{ min-height:40px; padding:4px 14px; font-size:.85rem; }
+  .kj-btn.copied{ background:var(--green) !important; border-color:var(--green); color:#fff !important; }
+
+  /* ---------- Search ---------- */
+  .kj-controls{ display:flex; flex-direction:column; gap:14px; margin-bottom:20px; }
   .kj-searchrow{ display:flex; gap:10px; align-items:stretch; flex-wrap:wrap; }
-  .kj-search{ flex:1 1 260px; display:flex; align-items:center; gap:8px; background:var(--paper-card); border:1.5px solid var(--ink); padding:0 14px; height:48px; }
-  .kj-search svg{ flex:none; opacity:0.6; }
-  .kj-search input{ flex:1; border:none; background:transparent; outline:none; font-family:'Zen Kaku Gothic New', sans-serif; font-size:16px; color:var(--ink); height:100%; }
-  .kj-search input::placeholder{ color:var(--ink-faint); }
-  .kj-btn{ height:48px; padding:0 18px; background:var(--ink); color:var(--paper); border:1.5px solid var(--ink); font-family:'Zen Kaku Gothic New', sans-serif; font-size:13.5px; font-weight:700; letter-spacing:0.04em; cursor:pointer; display:flex; align-items:center; gap:6px; transition:background 0.15s, color 0.15s; }
-  .kj-btn:hover{ background:var(--vermillion); border-color:var(--vermillion); }
-  .kj-btn.ghost{ background:transparent; color:var(--ink); }
-  .kj-btn.ghost:hover{ background:var(--ink); color:var(--paper); }
-  .kj-btn:disabled{ opacity:0.4; cursor:default; }
-  .kj-btn:disabled:hover{ background:var(--ink); }
+  .kj-search{ flex:1 1 300px; display:flex; align-items:center; gap:10px; background:var(--surface); border:3px solid var(--ink); border-radius:999px; padding:0 8px 0 18px; min-height:56px; box-shadow:var(--shadow); }
+  .kj-search:focus-within{ outline:3px solid var(--blue); outline-offset:2px; }
+  .kj-search .ic{ color:var(--ink-soft); width:1.4em; height:1.4em; }
+  .kj-search input{ flex:1; min-width:0; border:none; background:transparent; outline:none; font-size:1.05rem; font-weight:500; height:100%; padding:10px 0; }
+  .kj-search input::placeholder{ color:var(--ink-soft); opacity:.85; }
+  .kj-search .x{ flex:none; width:40px; height:40px; border-radius:50%; border:0; background:var(--gray-soft); color:var(--ink-soft); display:none; align-items:center; justify-content:center; }
+  .kj-search .x.show{ display:flex; }
+  .kj-search .x:hover{ background:var(--gray); color:#fff; }
+  .kj-tools{ display:flex; gap:10px; flex-wrap:wrap; }
 
-  .kj-filters{ display:flex; flex-wrap:wrap; gap:18px; align-items:center; }
-  .kj-filtergroup{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-  .kj-filtergroup .label{ font-size:11.5px; color:var(--ink-soft); letter-spacing:0.08em; margin-right:2px; }
-  .chip{ border:1px solid var(--hairline); background:var(--paper-card); color:var(--ink-soft); font-size:12.5px; padding:5px 11px; cursor:pointer; font-family:'Zen Kaku Gothic New', sans-serif; transition:all 0.12s; }
-  .chip:hover{ border-color:var(--ink); color:var(--ink); }
-  .chip.on{ background:var(--ink); color:var(--paper); border-color:var(--ink); }
-  .kj-count{ font-size:12px; color:var(--ink-faint); }
-  #kjRadicalSelect{ border:1px solid var(--hairline); background:var(--paper-card); color:var(--ink-soft); font-size:16px; padding:5px 8px; font-family:'Zen Kaku Gothic New', sans-serif; max-width:220px; }
+  /* ---------- Panels (kana / handwriting / words) ---------- */
+  .kj-panel{ display:none; background:var(--surface); border:3px solid var(--cb); border-radius:24px; padding:18px; box-shadow:var(--shadow); }
+  .kj-panel.show{ display:block; }
+  .kj-panel-title{ display:flex; align-items:center; gap:10px; font-weight:900; font-size:1.05rem; color:var(--cc); margin-bottom:12px; }
+  .kj-panel-title .bd{ width:38px; height:38px; border-radius:50%; background:var(--c); color:var(--co); display:grid; place-items:center; flex:none; }
+  .kj-panel-title .bd .ic{ width:20px; height:20px; }
+  .kj-panel-title small{ font-weight:700; font-size:.75rem; color:var(--ink-soft); margin-left:2px; }
+  .kj-label{ display:block; font-size:.82rem; font-weight:700; color:var(--ink-soft); margin-bottom:8px; }
+  .kj-label small{ font-weight:500; }
 
-  .kj-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(140px,1fr)); gap:14px; }
-  .kj-card{ position:relative; background:var(--paper-card); border:1px solid var(--hairline); cursor:pointer; padding:14px 12px 12px; transition:transform 0.12s, border-color 0.12s, box-shadow 0.12s; display:flex; flex-direction:column; align-items:center; gap:8px; }
-  .kj-card:hover{ border-color:var(--ink); transform:translateY(-2px); box-shadow:var(--shadow); }
-  .kj-card .stamp{ position:absolute; top:8px; right:8px; width:22px; height:22px; border-radius:50%; border:1.4px solid var(--vermillion); color:var(--vermillion); font-size:10.5px; font-weight:700; display:flex; align-items:center; justify-content:center; }
-  .kj-card .jlpt-tag{ position:absolute; top:8px; left:8px; font-size:9.5px; color:var(--indigo); border:1px solid var(--indigo); padding:1px 5px; letter-spacing:0.02em; }
-  .kj-card .cell{ width:88px; height:88px; border:1px solid var(--grid-line); background:linear-gradient(var(--grid-line-soft) 1px, transparent 1px) 0 0/100% 50%, linear-gradient(90deg, var(--grid-line-soft) 1px, transparent 1px) 0 0/50% 100%; background-color:var(--paper); display:flex; align-items:center; justify-content:center; }
-  .kj-card .cell svg{ width:72px; height:72px; }
-  .kanji-glyph path{ fill:none; stroke:var(--ink); stroke-width:3.4; stroke-linecap:round; stroke-linejoin:round; }
-  .kj-card .info{ text-align:center; }
-  .kj-card .reading{ font-size:12px; color:var(--ink-soft); line-height:1.5; }
-  .kj-card .meaning-en{ font-size:11px; color:var(--ink-faint); letter-spacing:0.02em; }
-  .kj-empty{ grid-column:1/-1; text-align:center; padding:60px 20px; color:var(--ink-faint); font-size:13.5px; }
-
-  .kj-overlay{ position:fixed; inset:0; background:rgba(33,28,21,0.55); display:none; align-items:center; justify-content:center; padding:20px; z-index:50; }
-  .kj-overlay.show{ display:flex; }
-  .kj-modal{ background:var(--paper); border:2px solid var(--ink); max-width:600px; width:100%; max-height:90vh; overflow-y:auto; padding:26px 26px 22px; position:relative; }
-  .kj-modal .close{ position:absolute; top:14px; right:14px; width:30px; height:30px; border:1px solid var(--ink); background:transparent; cursor:pointer; font-size:16px; color:var(--ink); display:flex; align-items:center; justify-content:center; }
-  .kj-modal .close:hover{ background:var(--ink); color:var(--paper); }
-  .kj-modal .star-btn{ position:absolute; top:12px; right:52px; width:32px; height:32px; border:none; background:transparent; cursor:pointer; font-size:22px; line-height:1; color:var(--ink-faint); display:flex; align-items:center; justify-content:center; transition:transform 0.12s; }
-  .kj-modal .star-btn:hover{ transform:scale(1.15); }
-  .kj-modal .star-btn.active{ color:#F2B705; }
-  #kjFavToggle.active{ background:#F2B705; border-color:#F2B705; color:#fff; }
-  #kjStudyModeToggle.active{ background:var(--indigo); border-color:var(--indigo); color:#fff; }
-  .kj-modal .back{ position:absolute; top:14px; left:26px; border:1px solid var(--hairline); background:var(--paper-card); cursor:pointer; font-size:11.5px; color:var(--ink-soft); padding:6px 10px; font-family:'Zen Kaku Gothic New', sans-serif; }
-  .kj-modal .back:hover{ border-color:var(--ink); color:var(--ink); }
-  .kj-modal-top{ display:flex; gap:22px; flex-wrap:wrap; align-items:flex-start; margin-bottom:16px; }
-  .kj-modal-stage{ width:184px; height:184px; border:1.5px solid var(--ink); background:linear-gradient(var(--grid-line-soft) 1px, transparent 1px) 0 0/100% 50%, linear-gradient(90deg, var(--grid-line-soft) 1px, transparent 1px) 0 0/50% 100%; background-color:var(--paper-card); position:relative; flex:none; }
-  .kj-modal-stage .corner{ position:absolute; width:10px; height:10px; }
-  .kj-modal-stage .corner.tl{ top:-1px; left:-1px; border-top:2px solid var(--vermillion); border-left:2px solid var(--vermillion); }
-  .kj-modal-stage .corner.tr{ top:-1px; right:-1px; border-top:2px solid var(--vermillion); border-right:2px solid var(--vermillion); }
-  .kj-modal-stage .corner.bl{ bottom:-1px; left:-1px; border-bottom:2px solid var(--vermillion); border-left:2px solid var(--vermillion); }
-  .kj-modal-stage .corner.br{ bottom:-1px; right:-1px; border-bottom:2px solid var(--vermillion); border-right:2px solid var(--vermillion); }
-  .kj-modal-stage svg{ width:100%; height:100%; }
-  .kj-modal-stage .kanji-glyph path{ stroke-width:3; }
-  .kj-modal-info{ flex:1 1 220px; min-width:200px; }
-  .kj-modal-info .toprow{ display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap; }
-  .kj-modal-info .kanji-big{ font-family:'Shippori Mincho', serif; font-size:15px; color:var(--ink-faint); letter-spacing:0.05em; }
-  .kj-modal-info .jlpt-badge{ font-size:11px; color:#fff; background:var(--indigo); padding:2px 8px; letter-spacing:0.05em; }
-  .kj-modal-info .row{ margin-bottom:10px; }
-  .kj-modal-info .row .k{ font-size:10.5px; color:var(--vermillion); letter-spacing:0.1em; display:block; margin-bottom:3px; font-weight:700; }
-  .kj-modal-info .row .v{ font-size:14.5px; line-height:1.6; }
-  .kj-modal-info .row .v.meaning-en{ color:var(--ink-soft); font-size:13px; }
-  .kj-modal-controls{ display:flex; gap:8px; margin-top:6px; flex-wrap:wrap; }
-  .kj-modal-controls .kj-btn{ height:38px; padding:0 14px; font-size:12.5px; }
-  .kj-modal-controls .kj-btn.copied{ background:var(--green); border-color:var(--green); color:#fff; }
-  .kj-example{ background:var(--paper-card); border-left:3px solid var(--vermillion); padding:12px 14px; margin-bottom:16px; }
-  .kj-example .ja{ font-size:15px; line-height:1.7; margin-bottom:4px; }
-  .kj-example .en{ font-size:12.5px; color:var(--ink-soft); }
-  .kj-example .k{ font-size:10.5px; color:var(--vermillion); letter-spacing:0.1em; font-weight:700; display:block; margin-bottom:6px; }
-  .kj-compounds{ margin-bottom:16px; margin-top:18px; padding-top:14px; border-top:1px solid var(--hairline); }
-  .kj-compounds .k{ font-size:10.5px; color:var(--vermillion); letter-spacing:0.1em; font-weight:700; display:block; margin-bottom:8px; }
-  .kj-compounds .list{ display:flex; flex-direction:column; gap:0; border-top:1px solid var(--hairline); }
-  .kj-compound-item{ display:flex; align-items:baseline; gap:10px; padding:8px 2px; border-bottom:1px solid var(--hairline); }
-  .kj-compound-item .word{ font-family:'Shippori Mincho', serif; font-size:17px; flex:none; min-width:52px; }
-  .kj-compound-item .word .wc{ display:inline-block; }
-  .kj-compound-item .word .wc.link{ color:var(--vermillion); cursor:pointer; }
-  .kj-compound-item .word .wc.link:hover{ text-decoration:underline; }
-  .kj-compound-item .word .wc.current{ color:var(--ink-faint); }
-  .kj-compound-item .reading{ font-size:11px; color:var(--ink-faint); flex:none; min-width:64px; }
-  .kj-compound-item .gloss{ font-size:12px; color:var(--ink-soft); line-height:1.5; }
-  .kj-compounds .none{ font-size:12px; color:var(--ink-faint); padding:6px 2px; }
-  .kj-modal-foot{ border-top:1px solid var(--hairline); padding-top:12px; font-size:11px; color:var(--ink-faint); line-height:1.7; }
-
-  .kj-hw-panel{
-    display:none;
-    background:var(--paper-card); border:1.5px solid var(--ink); padding:16px;
-    grid-template-columns:170px 1fr 1fr;
-    grid-template-areas:
-      "canvas hint    results"
-      "canvas actions results"
-      "canvas status  results";
-    gap:8px 18px;
-    align-items:start;
+  /* Kana keyboard */
+  .kj-kana-tabs{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+  .kj-kana-tabs button{ border:2px solid var(--green-bd); background:var(--surface); color:var(--green); border-radius:999px; padding:6px 16px; font-weight:900; font-size:.9rem; line-height:1.2; text-align:left; min-height:44px; }
+  .kj-kana-tabs button small{ display:block; font-size:.66rem; font-weight:700; }
+  .kj-kana-tabs button[aria-selected="true"]{ background:var(--green); border-color:var(--green); color:#fff; }
+  .kj-kana-keys{ display:grid; gap:6px; padding:2px; }
+  .kj-kana-keys.t-basic, .kj-kana-keys.t-voiced{ grid-template-columns:repeat(5,minmax(0,1fr)); }
+  .kj-kana-keys.t-contracted{ grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .kj-key{ min-height:48px; border-radius:14px; border:2px solid var(--green-bd); background:var(--green-soft); color:var(--ink); font-family:var(--font-kl); font-size:1.4rem; font-weight:600; box-shadow:var(--shadow); transition:transform .12s, background .12s; padding:0; }
+  .kj-key:hover{ transform:translateY(-2px); background:var(--green); color:#fff; border-color:var(--green); }
+  .kj-key:active{ transform:translateY(1px); }
+  .kj-key.blank{ visibility:hidden; pointer-events:none; }
+  .kj-kana-special{ display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; padding-top:10px; border-top:2px dashed var(--line); }
+  .kj-kana-special .kj-key{ flex:1 1 52px; min-width:52px; }
+  .kj-kana-special .kj-key.act{ font-family:var(--font-ui); font-size:.85rem; font-weight:900; display:flex; align-items:center; justify-content:center; gap:5px; flex:1 1 90px; }
+  .kj-key.act.del{ background:var(--orange-soft); border-color:var(--orange-bd); }
+  .kj-key.act.del:hover{ background:var(--orange); border-color:var(--orange); }
+  .kj-key.act.clr{ background:var(--gray-soft); border-color:var(--gray-bd); }
+  .kj-key.act.clr:hover{ background:var(--gray); border-color:var(--gray); }
+  .kj-kana-hint{ font-size:.78rem; color:var(--ink-soft); margin-top:10px; font-weight:500; }
+  @media (min-width:640px){
+    .kj-kana-keys.t-basic{ grid-auto-flow:column; grid-template-columns:none; grid-template-rows:repeat(5,minmax(0,1fr)); grid-auto-columns:minmax(0,1fr); }
+    .kj-kana-keys.t-voiced{ grid-auto-flow:column; grid-template-columns:none; grid-template-rows:repeat(5,minmax(0,1fr)); grid-auto-columns:minmax(0,1fr); }
+    .kj-kana-keys.t-contracted{ grid-auto-flow:column; grid-template-columns:none; grid-template-rows:repeat(3,minmax(0,1fr)); grid-auto-columns:minmax(0,1fr); }
+    .kj-key{ min-height:54px; font-size:1.55rem; }
   }
-  .kj-hw-panel.show{ display:grid; }
-  .kj-hw-canvas-wrap{ grid-area:canvas; width:170px; height:170px; border:1px solid var(--grid-line); background:linear-gradient(var(--grid-line-soft) 1px, transparent 1px) 0 0/100% 50%, linear-gradient(90deg, var(--grid-line-soft) 1px, transparent 1px) 0 0/50% 100%; background-color:var(--paper); position:relative; touch-action:none; }
-  .kj-hw-canvas-wrap canvas{ position:absolute; inset:0; width:100%; height:100%; }
-  .kj-hw-hint{ grid-area:hint; font-size:12px; color:var(--ink-soft); line-height:1.7; }
-  .kj-hw-actions{ grid-area:actions; display:flex; gap:8px; flex-wrap:wrap; align-self:start; }
-  .kj-hw-actions .kj-btn{ height:36px; padding:0 13px; font-size:12px; }
-  .kj-hw-status{ grid-area:status; font-size:11.5px; color:var(--ink-faint); min-height:16px; display:flex; align-items:center; gap:6px; }
-  .kj-hw-status .spinner{ width:11px; height:11px; border:2px solid var(--hairline); border-top-color:var(--vermillion); border-radius:50%; animation:spin 0.7s linear infinite; display:none; }
-  .kj-hw-status.loading .spinner{ display:inline-block; }
+
+  /* Handwriting + words panels */
+  .kj-hw-panel.show{ display:grid; grid-template-columns:180px 1fr 1fr; grid-template-areas:"canvas hint results" "canvas actions results" "canvas status results"; gap:8px 20px; align-items:start; }
+  .kj-pad{ width:180px; height:180px; border:3px solid var(--red-bd); border-radius:20px; overflow:hidden; background:var(--stroke-bg); position:relative; touch-action:none; }
+  .kj-pad::before{ content:""; position:absolute; left:50%; top:0; bottom:0; border-left:2px dashed var(--line); }
+  .kj-pad::after{ content:""; position:absolute; top:50%; left:0; right:0; border-top:2px dashed var(--line); }
+  .kj-pad canvas{ position:absolute; inset:0; width:100%; height:100%; z-index:1; }
+  .kj-hw-canvas-wrap{ grid-area:canvas; }
+  .kj-hw-hint{ grid-area:hint; font-size:.85rem; color:var(--ink-soft); line-height:1.7; font-weight:500; }
+  .kj-hw-hint small{ display:block; }
+  .kj-hw-actions{ grid-area:actions; display:flex; gap:8px; flex-wrap:wrap; }
+  .kj-status{ font-size:.82rem; color:var(--ink-soft); min-height:20px; display:flex; align-items:center; gap:8px; font-weight:700; }
+  .kj-hw-status{ grid-area:status; }
+  .kj-status .spinner{ width:14px; height:14px; border:3px solid var(--line); border-top-color:var(--blue); border-radius:50%; animation:spin .7s linear infinite; display:none; flex:none; }
+  .kj-status.loading .spinner{ display:inline-block; }
   @keyframes spin{ to{ transform:rotate(360deg); } }
   .kj-hw-results{ grid-area:results; min-width:0; }
-  .kj-hw-results .label{ font-size:11px; color:var(--ink-soft); letter-spacing:0.08em; margin-bottom:8px; display:block; }
   .kj-hw-reslist{ display:flex; gap:8px; flex-wrap:wrap; }
-  .kj-hw-cand{ width:62px; display:flex; flex-direction:column; align-items:center; gap:3px; cursor:pointer; border:1px solid var(--hairline); background:var(--paper); padding:6px 4px; transition:border-color 0.12s; }
-  .kj-hw-cand:hover{ border-color:var(--vermillion); }
-  .kj-hw-cand .g{ width:34px; height:34px; display:flex; align-items:center; justify-content:center; font-family:'Shippori Mincho', serif; font-size:26px; }
+  .kj-hw-cand{ width:68px; display:flex; flex-direction:column; align-items:center; gap:3px; border:2px solid var(--line); border-radius:16px; background:var(--surface); padding:6px 4px; cursor:pointer; }
+  .kj-hw-cand:hover{ border-color:var(--red); transform:translateY(-2px); }
+  .kj-hw-cand .g{ width:38px; height:38px; display:flex; align-items:center; justify-content:center; font-family:var(--font-kl); font-size:1.7rem; }
   .kj-hw-cand .g svg{ width:100%; height:100%; }
-  .kj-hw-cand .score{ font-size:9px; color:var(--ink-faint); }
-  .kj-hw-cand.best{ border-color:var(--vermillion); background:#FBF0EC; }
-  .kj-hw-cand.notfound{ opacity:0.55; cursor:default; }
-  .kj-hw-cand.notfound:hover{ border-color:var(--hairline); }
-  .kj-hw-cand.shape{ border-color:var(--indigo); border-style:dashed; }
-  .kj-hw-cand.shape:hover{ border-style:solid; }
-  .score.shape-tag{ color:var(--indigo); font-weight:700; }
-  .kj-hw-note{ font-size:10px; color:var(--ink-faint); margin-top:6px; line-height:1.5; }
+  .kj-hw-cand .score{ font-size:.68rem; color:var(--ink-soft); font-weight:700; }
+  .kj-hw-cand.best{ border-color:var(--red); background:var(--red-soft); }
+  .kj-hw-cand.notfound{ opacity:.55; cursor:default; }
+  .kj-hw-cand.notfound:hover{ border-color:var(--line); transform:none; }
+  .kj-hw-cand.shape{ border-color:var(--blue-bd); border-style:dashed; background:var(--blue-soft); }
+  .kj-hw-cand.shape:hover{ border-style:solid; border-color:var(--blue); }
+  .kj-hw-note{ font-size:.72rem; color:var(--ink-soft); margin-top:6px; line-height:1.6; }
 
-  /* Jukugo (compound word) lookup panel */
-  .kj-jk-panel{ display:none; background:var(--paper-card); border:1.5px solid var(--ink); padding:16px; flex-direction:column; gap:14px; }
-  .kj-jk-panel.show{ display:flex; }
-  .kj-jk-panel .label{ font-size:11px; color:var(--ink-soft); letter-spacing:0.08em; margin-bottom:8px; display:block; }
+  .kj-jk-panel.show{ display:flex; flex-direction:column; gap:14px; }
   .kj-jk-typerow{ display:flex; gap:8px; flex-wrap:wrap; }
-  .kj-jk-typerow input{ flex:1 1 160px; min-width:120px; height:42px; border:1.5px solid var(--ink); background:var(--paper); padding:0 12px; font-size:16px; font-family:'Zen Kaku Gothic New', sans-serif; color:var(--ink); }
-  .kj-jk-typerow .kj-btn{ height:42px; padding:0 16px; font-size:12.5px; }
-  .kj-jk-divider{ text-align:center; font-size:11px; color:var(--ink-faint); border-top:1px dashed var(--hairline); padding-top:14px; }
-  .kj-jk-countbtns{ display:flex; gap:8px; }
-  .kj-jk-countbtns .kj-btn{ height:40px; padding:0 18px; font-size:13px; }
-  .kj-jk-countbtns .kj-btn.active{ background:var(--vermillion); border-color:var(--vermillion); color:#fff; }
-  .kj-jk-progress{ display:flex; gap:8px; justify-content:center; margin-bottom:4px; }
-  .kj-jk-progress .slot{ width:44px; height:44px; border:1.5px solid var(--grid-line); background:var(--paper); display:flex; align-items:center; justify-content:center; font-family:'Shippori Mincho', serif; font-size:24px; color:var(--ink-faint); }
-  .kj-jk-progress .slot.filled{ border-color:var(--vermillion); color:var(--ink); }
+  .kj-jk-typerow input{ flex:1 1 180px; min-width:120px; min-height:48px; border:3px solid var(--ink); border-radius:999px; background:var(--surface); padding:0 18px; font-size:1rem; }
+  .kj-jk-divider{ text-align:center; font-size:.82rem; font-weight:700; color:var(--ink-soft); border-top:2px dashed var(--line); padding-top:14px; }
+  .kj-jk-divider small{ display:block; font-weight:500; }
+  .kj-jk-countbtns{ display:flex; gap:8px; flex-wrap:wrap; }
+  .kj-jk-progress{ display:flex; gap:8px; justify-content:center; margin-bottom:10px; }
+  .kj-jk-progress .slot{ width:48px; height:48px; border:3px solid var(--line); border-radius:14px; background:var(--surface); display:flex; align-items:center; justify-content:center; font-family:var(--font-kl); font-size:1.6rem; color:var(--ink-soft); }
+  .kj-jk-progress .slot.filled{ border-color:var(--orange); background:var(--orange-soft); color:var(--ink); }
   .kj-jk-progress .slot.current{ border-style:dashed; border-color:var(--ink); }
-  .kj-jk-canvas-wrap{ width:170px; height:170px; margin:0 auto; border:1px solid var(--grid-line); background:linear-gradient(var(--grid-line-soft) 1px, transparent 1px) 0 0/100% 50%, linear-gradient(90deg, var(--grid-line-soft) 1px, transparent 1px) 0 0/50% 100%; background-color:var(--paper); position:relative; touch-action:none; }
-  .kj-jk-canvas-wrap canvas{ position:absolute; inset:0; width:100%; height:100%; }
-  .kj-jk-actions{ display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
-  .kj-jk-actions .kj-btn{ height:36px; padding:0 13px; font-size:12px; }
-  .kj-jk-status{ font-size:11.5px; color:var(--ink-faint); min-height:16px; display:flex; align-items:center; justify-content:center; gap:6px; }
-  .kj-jk-status .spinner{ width:11px; height:11px; border:2px solid var(--hairline); border-top-color:var(--vermillion); border-radius:50%; animation:spin 0.7s linear infinite; display:none; }
-  .kj-jk-status.loading .spinner{ display:inline-block; }
+  .kj-jk-build .kj-pad{ margin:0 auto; }
+  .kj-jk-actions{ display:flex; gap:8px; flex-wrap:wrap; justify-content:center; margin-top:10px; }
+  .kj-jk-status{ justify-content:center; margin-top:6px; }
   .kj-jk-results{ text-align:center; }
   .kj-jk-results .kj-hw-reslist{ justify-content:center; }
-  .kj-jk-result{ background:var(--paper); border-left:3px solid var(--vermillion); padding:14px; }
-  .kj-jk-result .word{ font-family:'Shippori Mincho', serif; font-size:28px; margin-bottom:6px; }
-  .kj-jk-result .word .wc.link{ color:var(--vermillion); cursor:pointer; }
-  .kj-jk-result .word .wc.link:hover{ text-decoration:underline; }
-  .kj-jk-result .reading{ font-size:13px; color:var(--ink-soft); margin-bottom:4px; }
-  .kj-jk-result .gloss{ font-size:13px; color:var(--ink-soft); margin-bottom:10px; }
-  .kj-jk-result .notfound-word{ font-family:'Shippori Mincho', serif; font-size:24px; margin:6px 0; }
-  .kj-jk-result .notfound-msg{ font-size:12.5px; color:var(--ink-soft); line-height:1.7; margin-bottom:10px; }
+  .kj-jk-result{ background:var(--orange-soft); border:2px solid var(--orange-bd); border-radius:20px; padding:16px 18px; }
+  .kj-jk-result .word{ font-family:var(--font-kl); font-weight:600; font-size:2rem; margin-bottom:4px; }
+  .kj-jk-result .word .wc.link{ color:var(--red); cursor:pointer; text-decoration:underline dotted; text-underline-offset:.14em; }
+  .kj-jk-result .reading{ font-family:var(--font-kl); font-size:1rem; color:var(--ink-soft); margin-bottom:2px; }
+  .kj-jk-result .gloss{ font-size:.95rem; color:var(--ink-soft); margin-bottom:10px; }
+  .kj-jk-result .notfound-word{ font-family:var(--font-kl); font-size:1.7rem; margin:6px 0; }
+  .kj-jk-result .notfound-msg{ font-size:.9rem; color:var(--ink-soft); line-height:1.7; margin-bottom:10px; }
 
-  @media (max-width:560px){
-    .kj-brand .mark{ font-size:30px; }
-    .kj-tagline{ display:none; }
-    .kj-modal-top{ flex-direction:column; align-items:center; }
-    .kj-modal-info{ text-align:center; }
-    .kj-modal-info .toprow{ justify-content:center; }
-    .kj-filters{ gap:12px; }
-    #kjStrokeChips{ display:flex; flex-wrap:nowrap; overflow-x:auto; max-width:calc(100vw - 90px); padding-bottom:4px; -webkit-overflow-scrolling:touch; }
-    #kjStrokeChips .chip{ flex:none; }
-    .kj-hw-panel{
-      grid-template-columns:1fr;
-      grid-template-areas:
-        "canvas"
-        "actions"
-        "hint"
-        "status"
-        "results";
-    }
-    .kj-hw-canvas-wrap{ width:100%; max-width:320px; height:auto; aspect-ratio:1/1; margin:0 auto; }
-    .kj-jk-canvas-wrap{ width:100%; max-width:320px; height:auto; aspect-ratio:1/1; margin:0 auto; }
-  }
-  @media (prefers-reduced-motion: reduce){ * { transition:none !important; } }  /* ================= Fullscreen Lesson Mode ================= */
-  .kj-fs{
-    display:none; position:fixed; inset:0; z-index:200;
-    background:var(--paper);
-    flex-direction:column;
-    font-family:"Klee One","UD デジタル 教科書体 N-R","UDデジタル教科書体N-R","UD Digital Kyokasho N-R",'Zen Kaku Gothic New', sans-serif;
-  }
+  /* ---------- Filters ---------- */
+  .kj-filters{ background:var(--surface); border:2px solid var(--line); border-radius:24px; padding:14px 18px; box-shadow:var(--shadow); display:flex; flex-direction:column; gap:12px; }
+  .kj-frow{ display:flex; align-items:center; gap:10px 12px; flex-wrap:wrap; }
+  .kj-fname{ display:flex; align-items:center; gap:8px; min-width:104px; font-weight:900; font-size:.88rem; color:var(--cc); line-height:1.15; }
+  .kj-fname .bd{ width:32px; height:32px; border-radius:50%; background:var(--c); color:var(--co); display:grid; place-items:center; flex:none; }
+  .kj-fname .bd .ic{ width:17px; height:17px; }
+  .kj-fname small{ display:block; font-size:.66rem; font-weight:700; color:var(--ink-soft); }
+  .kj-chips{ display:flex; gap:6px; flex-wrap:wrap; min-width:0; flex:1; }
+  .chip{ border:2px solid var(--cb,var(--line)); background:var(--cs,var(--surface)); color:var(--cc,var(--ink)); border-radius:999px; font-size:.85rem; font-weight:900; padding:4px 13px; min-height:36px; line-height:1.1; transition:transform .12s, background .12s; }
+  .chip:hover{ transform:translateY(-2px); border-color:var(--c); }
+  .chip.on{ background:var(--c); border-color:var(--c); color:var(--co); }
+  #kjStrokeChips{ flex-wrap:nowrap; overflow-x:auto; padding:3px 2px 6px; -webkit-overflow-scrolling:touch; }
+  #kjStrokeChips .chip{ flex:none; }
+  #kjRadicalSelect{ border:2px solid var(--blue-bd); background:var(--blue-soft); color:var(--blue); border-radius:999px; font-weight:700; font-size:1rem; padding:6px 14px; min-height:40px; max-width:100%; }
+  .kj-fbottom{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:space-between; border-top:2px dashed var(--line); padding-top:10px; }
+  .kj-count{ font-size:.88rem; color:var(--ink-soft); font-weight:700; }
+
+  /* ---------- Home (entry tiles) ---------- */
+  .kj-home{ display:flex; flex-direction:column; gap:22px; }
+  .kj-home-intro{ background:var(--surface); border:2px solid var(--line); border-radius:24px; padding:16px 20px; box-shadow:var(--shadow); font-weight:700; line-height:1.7; }
+  .kj-home-intro small{ display:block; color:var(--ink-soft); font-weight:500; font-size:.82rem; }
+  .kj-home h2{ margin:0 0 10px; display:flex; align-items:center; gap:10px; font-size:1.15rem; font-weight:900; color:var(--cc); }
+  .kj-home h2 .bd{ width:38px; height:38px; border-radius:50%; background:var(--c); color:var(--co); display:grid; place-items:center; }
+  .kj-home h2 .bd .ic{ width:20px; height:20px; }
+  .kj-home h2 small{ font-size:.74rem; font-weight:700; color:var(--ink-soft); }
+  .kj-tiles{ display:grid; grid-template-columns:repeat(auto-fill,minmax(176px,1fr)); gap:12px; }
+  .kj-tile{ display:flex; align-items:center; gap:12px; text-align:left; background:var(--cs); border:2px solid var(--cb); border-radius:20px; padding:12px 14px; box-shadow:var(--shadow); transition:transform .15s, box-shadow .15s; }
+  .kj-tile:hover{ transform:translateY(-2px); box-shadow:0 8px 14px -8px rgba(0,0,0,.35); border-color:var(--c); }
+  .kj-tile .bd{ width:52px; height:52px; border-radius:50%; background:var(--c); color:var(--co); display:grid; place-items:center; flex:none; font-weight:900; font-size:1.05rem; line-height:1; }
+  .kj-tile .tx{ display:flex; flex-direction:column; min-width:0; }
+  .kj-tile .tx b{ font-size:1.05rem; font-weight:900; color:var(--ink); line-height:1.2; }
+  .kj-tile .tx small{ font-size:.72rem; font-weight:700; color:var(--ink-soft); }
+  .kj-tile .tx .n{ font-size:.78rem; font-weight:900; color:var(--cc); }
+
+  /* ---------- Results ---------- */
+  .kj-results{ display:none; }
+  .kj-results.show{ display:block; }
+  .kj-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(148px,1fr)); gap:14px; }
+  .kj-card{ position:relative; background:var(--surface); border:2px solid var(--line); border-radius:22px; padding:14px 10px 12px; display:flex; flex-direction:column; align-items:center; gap:8px; box-shadow:var(--shadow); text-align:center; transition:transform .15s, box-shadow .15s, border-color .15s; font-family:var(--font-kl); }
+  .kj-card:hover{ transform:translateY(-2px); border-color:var(--red); box-shadow:0 8px 14px -8px rgba(0,0,0,.35); }
+  .kj-card .stamp{ position:absolute; top:8px; right:8px; min-width:26px; height:26px; padding:0 4px; border-radius:999px; background:var(--orange); color:var(--orange-on); font-family:var(--font-ui); font-size:.78rem; font-weight:900; display:flex; align-items:center; justify-content:center; }
+  .jlpt-tag{ display:inline-flex; align-items:center; justify-content:center; background:var(--c); color:var(--co); border-radius:999px; font-family:var(--font-ui); font-weight:900; line-height:1; white-space:nowrap; }
+  .kj-card .jlpt-tag{ position:absolute; top:8px; left:8px; font-size:.7rem; padding:5px 8px; }
+  .kj-card .cell{ width:96px; height:96px; margin-top:16px; border:2px solid var(--red-bd); border-radius:16px; background:var(--stroke-bg); position:relative; overflow:hidden; display:flex; align-items:center; justify-content:center; }
+  .kj-card .cell::before{ content:""; position:absolute; left:50%; top:0; bottom:0; border-left:1.5px dashed var(--line); }
+  .kj-card .cell::after{ content:""; position:absolute; top:50%; left:0; right:0; border-top:1.5px dashed var(--line); }
+  .kj-card .cell svg{ width:78px; height:78px; position:relative; z-index:1; }
+  .kanji-glyph path{ fill:none; stroke:var(--ink); stroke-width:3.4; stroke-linecap:round; stroke-linejoin:round; }
+  .kj-card .info{ display:block; width:100%; }
+  .kj-card .reading{ display:block; font-size:.88rem; color:var(--ink); line-height:1.5; font-weight:600; overflow-wrap:anywhere; }
+  .kj-card .meaning-en{ display:block; font-family:var(--font-ui); font-size:.74rem; color:var(--ink-soft); font-weight:700; margin-top:2px; }
+  .okuri{ color:var(--ink-soft); font-weight:400; }
+  .rd-kun, .rd-on{ display:block; }
+  .rd-kun{ color:var(--green); }
+  .rd-on{ color:var(--purple); }
+  .rd-kun .okuri, .rd-on .okuri{ color:inherit; opacity:.7; }
+  .sep{ font-style:normal; color:var(--faint); }
+  .kj-empty{ text-align:center; padding:50px 20px; color:var(--ink-soft); font-size:.95rem; font-weight:700; line-height:1.9; background:var(--surface); border:2px dashed var(--line); border-radius:24px; }
+  .kj-empty small{ display:block; font-weight:500; }
+  .kj-more{ display:flex; justify-content:center; margin-top:20px; }
+
+  /* ---------- Credits ---------- */
+  .kj-credit{ margin-top:40px; background:var(--surface); border:2px solid var(--line); border-radius:20px; padding:14px 18px; font-size:.74rem; color:var(--ink-soft); line-height:1.8; font-weight:500; }
+  .kj-credit p{ margin:0 0 6px; }
+
+  /* ---------- Modal ---------- */
+  .kj-overlay{ position:fixed; inset:0; background:rgba(8,20,12,.62); display:none; align-items:center; justify-content:center; padding:16px; z-index:50; }
+  .kj-overlay.show{ display:flex; }
+  .kj-modal{ background:var(--surface); border:4px solid var(--red-bd); border-radius:32px; max-width:760px; width:100%; max-height:92vh; overflow-y:auto; padding:22px 24px 24px; position:relative; box-shadow:0 20px 50px -10px rgba(0,0,0,.5); animation:pop .2s ease; }
+  @keyframes pop{ from{ transform:scale(.95); opacity:0; } to{ transform:none; opacity:1; } }
+  .kj-modal-bar{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px; }
+  .kj-modal-bar .right{ display:flex; gap:8px; margin-left:auto; }
+  .kj-roundbtn{ width:46px; height:46px; border-radius:50%; border:2px solid var(--cb,var(--line)); background:var(--cs,var(--surface)); color:var(--cc,var(--ink)); display:grid; place-items:center; box-shadow:var(--shadow); transition:transform .15s; }
+  .kj-roundbtn:hover{ transform:translateY(-2px); background:var(--c,var(--ink)); color:var(--co,#fff); }
+  .kj-roundbtn .ic{ width:22px; height:22px; }
+  .kj-roundbtn.active{ background:var(--yellow); border-color:var(--yellow); color:var(--yellow-on); }
+  .kj-roundbtn.active .ic{ fill:currentColor; }
+  .kj-modal-top{ display:grid; grid-template-columns:230px minmax(0,1fr); gap:20px 24px; align-items:start; margin-bottom:18px; }
+  .kj-modal-left{ display:flex; flex-direction:column; align-items:center; gap:10px; }
+  .kj-modal-stage{ width:230px; height:230px; border:3px solid var(--red-bd); border-radius:24px; background:var(--stroke-bg); position:relative; overflow:hidden; max-width:100%; }
+  .kj-modal-stage::before{ content:""; position:absolute; left:50%; top:0; bottom:0; border-left:2px dashed var(--line); }
+  .kj-modal-stage::after{ content:""; position:absolute; top:50%; left:0; right:0; border-top:2px dashed var(--line); }
+  .kj-modal-stage svg{ position:absolute; inset:0; width:100%; height:100%; z-index:1; }
+  .kj-modal-stage .kanji-glyph path{ stroke-width:3.4; }
+  .kj-modal-btns{ display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
+  .kj-meaning{ display:flex; align-items:center; gap:12px; background:var(--teal-soft); border:2px solid var(--teal-bd); border-radius:20px; padding:10px 16px; margin-bottom:12px; }
+  .kj-meaning .bd{ width:44px; height:44px; border-radius:50%; background:var(--teal); color:var(--teal-on); display:grid; place-items:center; flex:none; }
+  .kj-meaning .bd .ic{ width:22px; height:22px; }
+  .kj-meaning .k{ font-size:.74rem; font-weight:900; color:var(--teal); line-height:1.1; }
+  .kj-meaning .k small{ font-weight:700; color:var(--ink-soft); }
+  .kj-meaning .v{ font-size:1.2rem; font-weight:900; line-height:1.35; overflow-wrap:anywhere; }
+  .kj-tiles6{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+  .kj-info{ display:flex; align-items:center; gap:10px; padding:9px 12px; background:var(--cs); border:2px solid var(--cb); border-radius:18px; box-shadow:var(--shadow); min-width:0; }
+  .kj-info .bd{ width:42px; height:42px; border-radius:50%; background:var(--c); color:var(--co); display:grid; place-items:center; flex:none; font-weight:900; }
+  .kj-info .bd .ic{ width:21px; height:21px; }
+  .kj-info .tx{ min-width:0; display:flex; flex-direction:column; gap:1px; }
+  .kj-info .k{ font-size:.72rem; font-weight:900; color:var(--cc); line-height:1.15; }
+  .kj-info .k small{ font-weight:700; color:var(--ink-soft); }
+  .kj-info .v{ font-family:var(--font-kl); font-weight:600; font-size:1.05rem; line-height:1.4; overflow-wrap:anywhere; }
+  .kj-info .v .sub{ font-family:var(--font-ui); font-size:.72em; font-weight:700; color:var(--ink-soft); }
+  .kj-info .v .lvl{ display:inline-flex; font-family:var(--font-ui); font-weight:900; background:var(--c); color:var(--co); border-radius:999px; padding:2px 12px; font-size:.95rem; }
+  .kj-info.wide{ grid-column:1/-1; }
+  .kj-box{ border-radius:22px; padding:14px 18px; margin-bottom:14px; }
+  .kj-box h3{ margin:0 0 10px; display:flex; align-items:center; gap:10px; font-size:.95rem; font-weight:900; color:var(--cc); }
+  .kj-box h3 .bd{ width:34px; height:34px; border-radius:50%; background:var(--c); color:var(--co); display:grid; place-items:center; }
+  .kj-box h3 .bd .ic{ width:18px; height:18px; }
+  .kj-box h3 small{ font-weight:700; color:var(--ink-soft); font-size:.72rem; }
+  .kj-example{ background:var(--green-soft); border:2px solid var(--green-bd); }
+  .kj-example .ja{ font-family:var(--font-kl); font-weight:600; font-size:1.3rem; line-height:1.9; overflow-wrap:anywhere; }
+  .kj-example .en{ font-size:.9rem; color:var(--ink-soft); margin-top:2px; font-weight:500; }
+  .hl{ color:var(--red); background:linear-gradient(transparent 62%,var(--yellow-bd) 62%); }
+  .kj-compounds{ background:var(--orange-soft); border:2px solid var(--orange-bd); margin-bottom:0; }
+  .kj-compounds .list{ display:flex; flex-direction:column; gap:8px; }
+  .kj-compound-item{ display:grid; grid-template-columns:minmax(70px,auto) minmax(70px,auto) minmax(0,1fr); gap:4px 14px; align-items:baseline; padding:8px 14px; background:var(--surface); border:2px solid var(--orange-bd); border-radius:16px; }
+  .kj-compound-item .word{ font-family:var(--font-kl); font-weight:600; font-size:1.35rem; }
+  .kj-compound-item .word .wc{ display:inline-block; }
+  .kj-compound-item .word .wc.link{ cursor:pointer; text-decoration:underline dotted; text-decoration-thickness:.05em; text-underline-offset:.14em; }
+  .kj-compound-item .word .wc.link:hover{ color:var(--red); }
+  .kj-compound-item .word .wc.current{ color:var(--red); }
+  .kj-compound-item .reading{ font-family:var(--font-kl); font-size:.95rem; color:var(--ink-soft); }
+  .kj-compound-item .gloss{ font-size:.85rem; color:var(--ink-soft); font-weight:500; line-height:1.5; }
+  .kj-compounds .none{ font-size:.88rem; color:var(--ink-soft); padding:4px 2px; font-weight:500; }
+
+  /* ---------- Fullscreen lesson mode ---------- */
+  .kj-fs{ --s:1; display:none; position:fixed; inset:0; z-index:200; background:var(--bg); flex-direction:column; font-family:var(--font-kl); }
   .kj-fs.show{ display:flex; }
-  .kj-fs-topbar{
-    display:flex; align-items:center; justify-content:space-between;
-    padding:14px 22px; border-bottom:2px solid var(--ink); flex:none; flex-wrap:wrap; gap:10px;
-  }
+  .kj-fs[data-mode="normal"]{ --c:var(--red); --cs:var(--red-soft); --cb:var(--red-bd); --co:var(--red-on); --cc:var(--red); }
+  .kj-fs[data-mode="reading"]{ --c:var(--blue); --cs:var(--blue-soft); --cb:var(--blue-bd); --co:var(--blue-on); --cc:var(--blue); }
+  .kj-fs[data-mode="writing"]{ --c:var(--purple); --cs:var(--purple-soft); --cb:var(--purple-bd); --co:var(--purple-on); --cc:var(--purple); }
+  .kj-fs-topbar{ font-family:var(--font-ui); display:flex; align-items:center; justify-content:space-between; gap:10px 16px; padding:12px 18px; flex:none; flex-wrap:wrap; background:var(--surface); border-bottom:3px solid var(--cb); }
   .kj-fs-modeswitch{ display:flex; gap:8px; flex-wrap:wrap; }
-  .kj-fs-modebtn{
-    border:1.5px solid var(--ink); background:var(--paper-card); color:var(--ink);
-    font-family:'Zen Kaku Gothic New', sans-serif; font-size:14px; font-weight:700;
-    padding:9px 16px; cursor:pointer;
-  }
-  .kj-fs-modebtn.active{ background:var(--indigo); border-color:var(--indigo); color:#fff; }
-  .kj-fs-close{
-    border:1.5px solid var(--ink); background:transparent; color:var(--ink); cursor:pointer;
-    font-family:'Zen Kaku Gothic New', sans-serif; font-size:13px; padding:9px 16px;
-  }
-  .kj-fs-close:hover{ background:var(--ink); color:var(--paper); }
+  .kj-fs-modebtn{ display:inline-flex; align-items:center; gap:8px; border:2px solid var(--mc); background:var(--ms); color:var(--mc); border-radius:999px; font-weight:900; font-size:.9rem; padding:5px 16px; min-height:46px; line-height:1.15; text-align:left; transition:transform .15s; }
+  .kj-fs-modebtn small{ display:block; font-size:.66rem; font-weight:700; }
+  .kj-fs-modebtn:hover{ transform:translateY(-2px); }
+  .kj-fs-modebtn.active{ background:var(--mc); color:#fff; }
+  .kj-fs-modebtn[data-mode="normal"]{ --mc:var(--red); --ms:var(--red-soft); }
+  .kj-fs-modebtn[data-mode="reading"]{ --mc:var(--blue); --ms:var(--blue-soft); }
+  .kj-fs-modebtn[data-mode="writing"]{ --mc:var(--purple); --ms:var(--purple-soft); }
+  .kj-fs-right{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .size{ display:inline-flex; align-items:center; border:2px solid var(--orange); border-radius:999px; background:var(--orange-soft); color:var(--orange); }
+  .size button{ border:0; background:transparent; min-width:48px; min-height:42px; font-weight:900; font-size:.95rem; color:var(--orange); border-radius:999px; }
+  .size button:hover:not(:disabled){ background:var(--orange); color:#fff; }
+  .size button:disabled{ opacity:.35; cursor:not-allowed; }
+  .size output{ min-width:3.2em; text-align:center; font-size:.82rem; color:var(--ink); font-variant-numeric:tabular-nums; font-weight:700; }
+  .size-label{ font-size:.7rem; font-weight:700; color:var(--ink-soft); }
 
-  .kj-fs-normal{
-    flex:1; display:flex; gap:32px; padding:28px 40px; overflow-y:auto; align-items:flex-start; flex-wrap:wrap; justify-content:center;
-  }
-  .kj-fs-glyph-col{ display:flex; flex-direction:column; align-items:center; gap:16px; flex:none; }
-  .kj-fs-stage{
-    width:min(46vw, 46vh, 480px); height:min(46vw, 46vh, 480px);
-    border:2px solid var(--ink);
-    background:linear-gradient(var(--grid-line-soft) 1px, transparent 1px) 0 0/100% 50%, linear-gradient(90deg, var(--grid-line-soft) 1px, transparent 1px) 0 0/50% 100%;
-    background-color:var(--paper-card);
-  }
-  .kj-fs-stage svg{ width:100%; height:100%; }
-  .kj-fs-stage .kanji-glyph path{ stroke-width:2.6; }
+  .kj-fs-normal{ flex:1; display:flex; gap:28px 40px; padding:26px 36px; overflow-y:auto; align-items:flex-start; flex-wrap:wrap; justify-content:center; }
+  .kj-fs-glyph-col{ display:flex; flex-direction:column; align-items:center; gap:16px; flex:none; width:max(calc(min(46vw,46vh,480px)*var(--s)),280px); max-width:100%; }
+  .kj-fs-stage{ width:calc(min(46vw,46vh,480px)*var(--s)); height:calc(min(46vw,46vh,480px)*var(--s)); max-width:100%; aspect-ratio:1; border:3px solid var(--red-bd); border-radius:28px; background:var(--stroke-bg); position:relative; overflow:hidden; }
+  .kj-fs-stage::before{ content:""; position:absolute; left:50%; top:0; bottom:0; border-left:2px dashed var(--line); }
+  .kj-fs-stage::after{ content:""; position:absolute; top:50%; left:0; right:0; border-top:2px dashed var(--line); }
+  .kj-fs-stage svg{ position:absolute; inset:0; width:100%; height:100%; z-index:1; }
+  .kj-fs-stage .kanji-glyph path{ stroke-width:2.8; }
   .kj-fs-controls{ display:flex; gap:10px; flex-wrap:wrap; justify-content:center; }
-  .kj-fs-btn{
-    height:44px; padding:0 18px; background:var(--ink); color:var(--paper); border:1.5px solid var(--ink);
-    font-family:'Zen Kaku Gothic New', sans-serif; font-size:14px; font-weight:700; cursor:pointer;
-  }
-  .kj-fs-btn:hover{ background:var(--vermillion); border-color:var(--vermillion); }
-  .kj-fs-btn.ghost{ background:transparent; color:var(--ink); }
-  .kj-fs-btn.ghost:hover{ background:var(--ink); color:var(--paper); }
-  .kj-fs-btn.copied{ background:var(--green); border-color:var(--green); color:#fff; }
-  .kj-fs-btn.active{ color:#F2B705; border-color:#F2B705; }
+  .kj-fs-info{ flex:1 1 440px; min-width:300px; max-width:700px; font-size:calc(1rem*var(--s)); }
+  .kj-fs-info .kj-meaning .v{ font-size:calc(1.5rem*var(--s)); }
+  .kj-fs-info .kj-info{ padding:calc(10px*var(--s)) calc(14px*var(--s)); }
+  .kj-fs-info .kj-info .k{ font-size:calc(.8rem*var(--s)); }
+  .kj-fs-info .kj-info .v{ font-size:calc(1.35rem*var(--s)); }
+  .kj-fs-info .kj-example .ja{ font-size:calc(1.8rem*var(--s)); }
+  .kj-fs-info .kj-example .en{ font-size:calc(1.05rem*var(--s)); }
+  .kj-fs-info .kj-compound-item .word{ font-size:calc(1.9rem*var(--s)); }
+  .kj-fs-info .kj-compound-item .reading{ font-size:calc(1.15rem*var(--s)); }
+  .kj-fs-info .kj-compound-item .gloss{ font-size:calc(1rem*var(--s)); }
+  .kj-fs-info .kj-box h3{ font-family:var(--font-ui); font-size:calc(1rem*var(--s)); }
 
-  .kj-fs-info{ flex:1 1 420px; min-width:320px; max-width:640px; }
-  .kj-fs-toprow{ display:flex; align-items:center; gap:14px; margin-bottom:16px; flex-wrap:wrap; }
-  .kj-fs-kanji-small{ font-size:22px; color:var(--ink-soft); }
-  .kj-fs-jlpt{ font-size:14px; color:#fff; background:var(--indigo); padding:4px 12px; }
-  .kj-fs-row{ margin-bottom:14px; font-size:19px; line-height:1.6; }
-  .kj-fs-row .k{ font-size:12px; color:var(--vermillion); letter-spacing:0.1em; font-weight:700; display:block; margin-bottom:4px; }
-  .kj-fs-example{ background:var(--paper-card); border-left:4px solid var(--vermillion); padding:16px 18px; margin:18px 0; font-size:18px; line-height:1.8; }
-  .kj-fs-example .en{ font-size:15px; color:var(--ink-soft); margin-top:4px; }
-  .kj-fs-compounds .k{ font-size:12px; color:var(--vermillion); letter-spacing:0.1em; font-weight:700; display:block; margin-bottom:8px; }
-  .kj-fs-compounds .list{ display:flex; flex-direction:column; gap:0; border-top:1px solid var(--hairline); }
-  .kj-fs-compounds .kj-compound-item{ display:flex; align-items:baseline; gap:14px; padding:10px 2px; border-bottom:1px solid var(--hairline); font-size:16px; }
-  .kj-fs-compounds .kj-compound-item .word{ font-size:22px; flex:none; min-width:70px; }
-  .kj-fs-compounds .kj-compound-item .word .wc.link{ color:var(--vermillion); cursor:pointer; }
-  .kj-fs-compounds .kj-compound-item .word .wc.link:hover{ text-decoration:underline; }
-  .kj-fs-compounds .kj-compound-item .reading{ font-size:13px; color:var(--ink-faint); flex:none; min-width:80px; }
-  .kj-fs-compounds .kj-compound-item .gloss{ font-size:14px; color:var(--ink-soft); }
-  .kj-fs-compounds .none{ font-size:14px; color:var(--ink-faint); padding:6px 2px; }
-
-  .kj-fs-study{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:24px; padding:20px; overflow:hidden; }
-  .kj-fs-stage2{ display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; min-height:40vh; cursor:pointer; user-select:none; }
-  .kj-fs-stage2 .back{ color:var(--vermillion); min-height:1.4em; }
+  .kj-fs-study{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:22px; padding:20px; overflow:hidden; }
+  .kj-fs-stage2{ display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; min-height:40vh; cursor:pointer; user-select:none; width:min(100%,1100px); background:var(--cs); border:3px solid var(--cb); border-radius:32px; padding:20px; box-shadow:var(--shadow); text-align:center; overflow-wrap:anywhere; }
+  .kj-fs-stage2 .back{ color:var(--c); min-height:1.4em; }
   .kj-fs-stage2 .front{ color:var(--ink); }
-  .kj-fs-word-meaning{ font-size:20px; color:var(--ink-soft); text-align:center; min-height:1.5em; }
-  .kj-fs-wordlist{ flex:none; width:100%; max-width:1000px; display:flex; flex-wrap:wrap; gap:10px; justify-content:center; max-height:22vh; overflow-y:auto; padding:6px; }
-  .kj-fs-word-chip{
-    border:1.5px solid var(--hairline); background:var(--paper-card); color:var(--ink);
-    font-family:"Klee One","UD デジタル 教科書体 N-R","UDデジタル教科書体N-R","UD Digital Kyokasho N-R",'Zen Kaku Gothic New', sans-serif;
-    font-size:20px; padding:8px 16px; cursor:pointer;
-  }
-  .kj-fs-word-chip:hover{ border-color:var(--vermillion); }
-  .kj-fs-word-chip.selected{ border-color:var(--vermillion); background:#FBF0EC; }
-  .kj-fs-word-chip .tag{ font-size:9px; color:var(--ink-faint); display:block; margin-top:2px; }
-  .kj-fs-empty{ color:var(--ink-faint); font-size:15px; text-align:center; padding:20px; }
+  .kj-fs-word-meaning{ font-family:var(--font-ui); font-size:calc(1.3rem*var(--s)); font-weight:700; color:var(--ink-soft); text-align:center; min-height:1.5em; }
+  .kj-fs-wordlist{ flex:none; width:100%; max-width:1000px; display:flex; flex-wrap:wrap; gap:10px; justify-content:center; max-height:24vh; overflow-y:auto; padding:6px; }
+  .kj-fs-word-chip{ border:2px solid var(--cb); background:var(--surface); color:var(--ink); font-family:var(--font-kl); font-size:calc(1.35rem*var(--s)); font-weight:600; padding:8px 18px; border-radius:18px; box-shadow:var(--shadow); }
+  .kj-fs-word-chip:hover{ border-color:var(--c); }
+  .kj-fs-word-chip.selected{ border-color:var(--c); background:var(--c); color:var(--co); }
+  .kj-fs-word-chip .tag{ font-family:var(--font-ui); font-size:.6rem; font-weight:700; display:block; margin-top:2px; opacity:.85; }
+  .kj-fs-empty{ color:var(--ink-soft); font-size:1rem; font-weight:700; text-align:center; padding:20px; }
 
+  /* ---------- Small screens ---------- */
+  @media (max-width:760px){
+    .kj-modal-top{ grid-template-columns:minmax(0,1fr); }
+    .kj-modal-stage{ margin:0 auto; }
+    .kj-compound-item{ grid-template-columns:auto minmax(0,1fr); }
+    .kj-compound-item .gloss{ grid-column:1/-1; }
+  }
   @media (max-width:800px){
-    .kj-fs-normal{ padding:18px; gap:20px; }
-    .kj-fs-stage{ width:min(80vw,80vh,340px); height:min(80vw,80vh,340px); }
-    .kj-fs-row{ font-size:16px; }
+    .kj-hw-panel.show{ grid-template-columns:minmax(0,1fr); grid-template-areas:"canvas" "actions" "hint" "status" "results"; }
+    .kj-hw-canvas-wrap{ width:100%; max-width:320px; height:auto; aspect-ratio:1/1; margin:0 auto; }
+    .kj-fs-normal{ padding:16px; gap:20px; }
+    .kj-fs-stage{ width:calc(min(80vw,80vh,340px)*var(--s)); height:calc(min(80vw,80vh,340px)*var(--s)); }
+  }
+  @media (max-width:560px){
+    .kj-header-in{ padding:14px 16px; }
+    .kj-brand .mark{ font-size:2.2rem; }
+    .kj-tagline{ font-size:.78rem; }
+    .kj-tools .kj-btn{ flex:1 1 calc(50% - 10px); }
+    .kj-fname{ min-width:100%; }
+    .kj-tiles{ grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .kj-tile{ padding:10px; gap:8px; }
+    .kj-tile .bd{ width:44px; height:44px; font-size:.95rem; }
+    .kj-grid{ grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+    .kj-card .cell{ width:88px; height:88px; }
+    .kj-modal{ padding:16px 14px 18px; border-radius:26px; }
+    .kj-tiles6{ grid-template-columns:minmax(0,1fr); }
+    .kj-fs-topbar{ padding:10px 12px; }
+    .kj-pad{ max-width:100%; }
+  }
+  @media (prefers-reduced-motion: reduce){
+    *{ transition:none !important; animation:none !important; }
+    .kj-btn:hover, .kj-tile:hover, .kj-card:hover, .chip:hover, .kj-key:hover, .kj-roundbtn:hover, .kj-fs-modebtn:hover{ transform:none !important; }
   }
 </style>
 </head>
 <body>
+
+<!-- Icon sprite (inline SVG, no external library) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+    <symbol id="i-pen" viewBox="0 0 24 24"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></symbol>
+    <symbol id="i-keyboard" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10"/></symbol>
+    <symbol id="i-book-open" viewBox="0 0 24 24"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></symbol>
+    <symbol id="i-monitor" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+    <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></symbol>
+    <symbol id="i-backspace" viewBox="0 0 24 24"><path d="M20 5H9l-7 7 7 7h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2Z"/><path d="m18 9-6 6"/><path d="m12 9 6 6"/></symbol>
+    <symbol id="i-rotate" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+    <symbol id="i-hash" viewBox="0 0 24 24"><path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/></symbol>
+    <symbol id="i-cap" viewBox="0 0 24 24"><path d="M22 10 12 5 2 10l10 5 10-5Z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></symbol>
+    <symbol id="i-award" viewBox="0 0 24 24"><circle cx="12" cy="8" r="6"/><path d="M15.477 12.89 17 22l-5-3-5 3 1.523-9.11"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 12h18M12 3v18"/></symbol>
+    <symbol id="i-volume" viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4V5Z"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></symbol>
+    <symbol id="i-message" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-turtle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 2 10 5-10 5L2 7l10-5Z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></symbol>
+  </defs>
+</svg>
+
 <div class="kj-root">
 
-  <div class="kj-header">
-    <div class="kj-brand" id="kjHomeLink" style="cursor:pointer;" title="ホームに戻る">
-      <div class="mark">筆<span class="accent">順</span></div>
-      <div class="sub">hitsujun<br>書き順辞典</div>
+  <!-- ================= Header ================= -->
+  <header class="kj-header">
+    <svg class="decor" viewBox="0 0 800 120" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+      <circle cx="680" cy="46" r="38" fill="#fde68a" opacity="0.7"/>
+      <circle cx="110" cy="90" r="28" fill="#99f6e4" opacity="0.55"/>
+      <circle cx="560" cy="92" r="16" fill="#86efac" opacity="0.7"/>
+      <path d="M0 104 Q 50 88 100 104 T 200 104 T 300 104 T 400 104 T 500 104 T 600 104 T 700 104 T 800 104 V120 H0Z" fill="#86efac" opacity="0.45"/>
+      <path d="M0 114 Q 50 100 100 114 T 200 114 T 300 114 T 400 114 T 500 114 T 600 114 T 700 114 T 800 114 V120 H0Z" fill="#99f6e4" opacity="0.45"/>
+    </svg>
+    <div class="kj-header-in">
+      <button class="kj-brand" id="kjHomeLink" type="button" title="ホームに戻る / Back to home">
+        <span class="mark">筆<span class="accent">順</span></span>
+        <span class="sub">hitsujun<br>書き順辞典</span>
+      </button>
+      <div class="kj-tagline">広告なし。留学生のための、漢字の書き順・読み方シンプル辞典。
+        <small>No ads. A simple kanji dictionary for international students: stroke order and readings.</small>
+      </div>
     </div>
-    <div class="kj-tagline">広告なし。留学生のための、漢字の書き順・読み方シンプル辞典。</div>
-  </div>
+  </header>
 
-  <div class="kj-controls">
+  <!-- ================= Controls ================= -->
+  <section class="kj-controls">
     <div class="kj-searchrow">
       <div class="kj-search">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="5.2" stroke="#211C15" stroke-width="1.4"/><path d="M11 11L14.5 14.5" stroke="#211C15" stroke-width="1.4" stroke-linecap="round"/></svg>
-        <input id="kjSearchInput" type="text" placeholder="漢字・読み方（ひらがな）・意味で検索　例：やま／mountain／山">
+        <svg class="ic"><use href="#i-search"/></svg>
+        <input id="kjSearchInput" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="検索 / Search"
+               placeholder="漢字・読み・意味 / Search　例：やま 山">
+        <button class="x" id="kjSearchClear" type="button" aria-label="入力を消す / Clear text"><svg class="ic"><use href="#i-x"/></svg></button>
       </div>
-      <button class="kj-btn ghost" id="kjHwToggle">✎ 手書きで探す</button>
-      <button class="kj-btn ghost" id="kjJukugoToggle">🔤 熟語・言葉で調べる</button>
-      <button class="kj-btn ghost" id="kjFavToggle">☆ お気に入り</button>
-      <button class="kj-btn ghost" id="kjStudyModeToggle">🖥 学習モード</button>
     </div>
 
-    <div class="kj-hw-panel" id="kjHwPanel">
-      <div class="kj-hw-canvas-wrap">
-        <canvas id="kjHwCanvas"></canvas>
+    <div class="kj-tools">
+      <button class="kj-btn c-green" id="kjKanaToggle" type="button" aria-pressed="false">
+        <svg class="ic"><use href="#i-keyboard"/></svg><span class="lb"><b>五十音表</b><small>Kana keyboard</small></span>
+      </button>
+      <button class="kj-btn c-blue" id="kjHwToggle" type="button" aria-pressed="false">
+        <svg class="ic"><use href="#i-pen"/></svg><span class="lb"><b>手書きで探す</b><small>Draw a kanji</small></span>
+      </button>
+      <button class="kj-btn c-orange" id="kjJukugoToggle" type="button" aria-pressed="false">
+        <svg class="ic"><use href="#i-book-open"/></svg><span class="lb"><b>熟語・言葉</b><small>Look up words</small></span>
+      </button>
+      <button class="kj-btn c-yellow" id="kjFavToggle" type="button" aria-pressed="false">
+        <svg class="ic"><use href="#i-star"/></svg><span class="lb"><b>お気に入り<span id="kjFavCount"></span></b><small>Favorites</small></span>
+      </button>
+      <button class="kj-btn c-purple" id="kjStudyModeToggle" type="button" aria-pressed="false">
+        <svg class="ic"><use href="#i-monitor"/></svg><span class="lb"><b>学習モード</b><small>Study mode (big screen)</small></span>
+      </button>
+    </div>
+
+    <!-- Kana keyboard panel -->
+    <div class="kj-panel c-green" id="kjKanaPanel">
+      <div class="kj-panel-title"><span class="bd"><svg class="ic"><use href="#i-keyboard"/></svg></span>
+        <span>五十音表 <small>Kana keyboard — タップすると、上の検索欄に入ります / Tap a letter. It goes into the search box.</small></span></div>
+      <div class="kj-kana-tabs" role="tablist" aria-label="かなの種類 / Kana type">
+        <button type="button" role="tab" data-tab="basic" aria-selected="true">清音<small>Basic</small></button>
+        <button type="button" role="tab" data-tab="voiced" aria-selected="false">濁音・半濁音<small>Voiced (゛ ゜)</small></button>
+        <button type="button" role="tab" data-tab="contracted" aria-selected="false">拗音<small>Contracted (きゃ…)</small></button>
       </div>
+      <div class="kj-kana-keys t-basic" id="kjKanaKeys"></div>
+      <div class="kj-kana-special" id="kjKanaSpecial"></div>
+      <div class="kj-kana-hint">例：「やま」→ 山 ／ 「たべる」→ 食 　Example: type “やま” to find 山.</div>
+    </div>
+
+    <!-- Handwriting panel -->
+    <div class="kj-panel kj-hw-panel c-blue" id="kjHwPanel">
+      <div class="kj-pad kj-hw-canvas-wrap"><canvas id="kjHwCanvas"></canvas></div>
       <div class="kj-hw-actions">
-        <button class="kj-btn" id="kjHwRecognize">この字を認識する</button>
-        <button class="kj-btn ghost" id="kjHwClear">クリア</button>
+        <button class="kj-btn solid c-blue" id="kjHwRecognize" type="button"><svg class="ic"><use href="#i-search"/></svg><span class="lb"><b>この字を認識する</b><small>Recognize</small></span></button>
+        <button class="kj-btn c-gray" id="kjHwClear" type="button"><svg class="ic"><use href="#i-rotate"/></svg><span class="lb"><b>クリア</b><small>Clear</small></span></button>
       </div>
-      <div class="kj-hw-hint">枠の中に、探したい漢字を書いてください。書き順や画数が多少違っても、AIモデルが字の形から認識します。</div>
-      <div class="kj-hw-status" id="kjHwStatus"><span class="spinner"></span><span class="txt"></span></div>
+      <div class="kj-hw-hint">枠の中に、探したい漢字を書いてください。書き順や画数が多少違っても、AIモデルが字の形から認識します。
+        <small>Write the kanji in the box. The AI model reads the shape, even if the stroke order is a little different.</small></div>
+      <div class="kj-status kj-hw-status" id="kjHwStatus"><span class="spinner"></span><span class="txt"></span></div>
       <div class="kj-hw-results">
-        <span class="label">候補（AIモデルによる認識結果）</span>
+        <span class="kj-label">候補（AIモデルによる認識結果） <small>Results</small></span>
         <div class="kj-hw-reslist" id="kjHwResults"></div>
       </div>
     </div>
 
-    <div class="kj-jk-panel" id="kjJukugoPanel">
+    <!-- Words (jukugo) panel -->
+    <div class="kj-panel kj-jk-panel c-orange" id="kjJukugoPanel">
+      <div class="kj-panel-title"><span class="bd"><svg class="ic"><use href="#i-book-open"/></svg></span>
+        <span>熟語・言葉で調べる <small>Look up words</small></span></div>
       <div class="kj-jk-typebox">
-        <span class="label">直接入力・貼り付けで調べる</span>
+        <span class="kj-label">直接入力・貼り付けで調べる <small>Type or paste a word</small></span>
         <div class="kj-jk-typerow">
-          <input id="kjJukugoInput" type="text" placeholder="例：風景、ほほえみ">
-          <button class="kj-btn" id="kjJukugoTypeSearch">調べる</button>
+          <input id="kjJukugoInput" type="text" placeholder="例：風景、ほほえみ / e.g. 風景" aria-label="言葉 / Word">
+          <button class="kj-btn solid c-orange" id="kjJukugoTypeSearch" type="button"><svg class="ic"><use href="#i-search"/></svg><span class="lb"><b>調べる</b><small>Search</small></span></button>
         </div>
       </div>
 
-      <div class="kj-jk-divider">または、1文字ずつ手書きで選んで調べる（ひらがなも書けます）</div>
+      <div class="kj-jk-divider">または、1文字ずつ手書きで選んで調べる（ひらがなも書けます）<small>Or draw the word one letter at a time (hiragana is OK too)</small></div>
 
       <div class="kj-jk-count" id="kjJukugoCountBox">
-        <span class="label">何文字の言葉ですか？</span>
+        <span class="kj-label">何文字の言葉ですか？ <small>How many letters?</small></span>
         <div class="kj-jk-countbtns">
-          <button class="kj-btn ghost" data-n="2">2文字</button>
-          <button class="kj-btn ghost" data-n="3">3文字</button>
-          <button class="kj-btn ghost" data-n="4">4文字</button>
+          <button class="kj-btn c-orange" type="button" data-n="2"><span class="lb"><b>2文字</b><small>2 letters</small></span></button>
+          <button class="kj-btn c-orange" type="button" data-n="3"><span class="lb"><b>3文字</b><small>3 letters</small></span></button>
+          <button class="kj-btn c-orange" type="button" data-n="4"><span class="lb"><b>4文字</b><small>4 letters</small></span></button>
         </div>
       </div>
 
       <div class="kj-jk-build" id="kjJukugoBuild" style="display:none;">
         <div class="kj-jk-progress" id="kjJukugoProgress"></div>
-
-        <div class="kj-jk-canvas-wrap">
-          <canvas id="kjJukugoCanvas"></canvas>
-        </div>
+        <div class="kj-pad kj-jk-canvas-wrap"><canvas id="kjJukugoCanvas"></canvas></div>
         <div class="kj-jk-actions">
-          <button class="kj-btn" id="kjJukugoRecognize">この字を認識する</button>
-          <button class="kj-btn ghost" id="kjJukugoClear">クリア</button>
-          <button class="kj-btn ghost" id="kjJukugoRestart">最初からやり直す</button>
+          <button class="kj-btn solid c-blue" id="kjJukugoRecognize" type="button"><svg class="ic"><use href="#i-search"/></svg><span class="lb"><b>この字を認識する</b><small>Recognize</small></span></button>
+          <button class="kj-btn c-gray" id="kjJukugoClear" type="button"><svg class="ic"><use href="#i-rotate"/></svg><span class="lb"><b>クリア</b><small>Clear</small></span></button>
+          <button class="kj-btn c-gray" id="kjJukugoRestart" type="button"><svg class="ic"><use href="#i-arrow-left"/></svg><span class="lb"><b>最初からやり直す</b><small>Start over</small></span></button>
         </div>
-        <div class="kj-jk-status" id="kjJukugoStatus"><span class="spinner"></span><span class="txt"></span></div>
+        <div class="kj-status kj-jk-status" id="kjJukugoStatus"><span class="spinner"></span><span class="txt"></span></div>
         <div class="kj-jk-results">
-          <span class="label">候補（合っていれば選んでください）</span>
+          <span class="kj-label">候補（合っていれば選んでください） <small>Pick the correct one</small></span>
           <div class="kj-hw-reslist" id="kjJukugoResults"></div>
         </div>
       </div>
@@ -383,99 +554,150 @@
       <div class="kj-jk-result" id="kjJukugoResultBox" style="display:none;"></div>
     </div>
 
+    <!-- Filters -->
     <div class="kj-filters">
-      <div class="kj-filtergroup"><span class="label">学年</span><div id="kjGradeChips"></div></div>
-      <div class="kj-filtergroup"><span class="label">JLPT</span><div id="kjJlptChips"></div></div>
-      <div class="kj-filtergroup"><span class="label">画数</span><div id="kjStrokeChips"></div></div>
-      <div class="kj-filtergroup"><span class="label">部首</span><select id="kjRadicalSelect"><option value="">すべて</option></select></div>
-      <button class="kj-btn ghost" id="kjClearFilters" style="height:30px;padding:0 12px;font-size:11.5px;">絞り込み解除</button>
-      <span class="kj-count" id="kjCount"></span>
+      <div class="kj-frow c-pink">
+        <div class="kj-fname"><span class="bd"><svg class="ic"><use href="#i-cap"/></svg></span><span>学年<small>Grade</small></span></div>
+        <div class="kj-chips" id="kjGradeChips"></div>
+      </div>
+      <div class="kj-frow c-teal">
+        <div class="kj-fname"><span class="bd"><svg class="ic"><use href="#i-award"/></svg></span><span>JLPT<small>Level</small></span></div>
+        <div class="kj-chips" id="kjJlptChips"></div>
+      </div>
+      <div class="kj-frow c-orange">
+        <div class="kj-fname"><span class="bd"><svg class="ic"><use href="#i-hash"/></svg></span><span>画数<small>Strokes</small></span></div>
+        <div class="kj-chips" id="kjStrokeChips"></div>
+      </div>
+      <div class="kj-frow c-blue">
+        <div class="kj-fname"><span class="bd"><svg class="ic"><use href="#i-grid"/></svg></span><span>部首<small>Radical</small></span></div>
+        <div class="kj-chips"><select id="kjRadicalSelect" aria-label="部首 / Radical"><option value="">すべて / All</option></select></div>
+      </div>
+      <div class="kj-fbottom">
+        <span class="kj-count" id="kjCount"></span>
+        <button class="kj-btn sm c-gray" id="kjClearFilters" type="button"><svg class="ic"><use href="#i-rotate"/></svg><span class="lb"><b>絞り込み解除</b><small>Clear all</small></span></button>
+      </div>
     </div>
-  </div>
+  </section>
 
-  <div class="kj-grid" id="kjGrid"></div>
+  <!-- ================= Home (entry tiles) ================= -->
+  <section class="kj-home" id="kjHome">
+    <div class="kj-home-intro">下の「学年」か「JLPT」を選ぶか、上で検索してください。
+      <small>Choose a grade or a JLPT level below, or search above. Kanji will appear after you choose.</small></div>
+    <div class="c-pink">
+      <h2><span class="bd"><svg class="ic"><use href="#i-cap"/></svg></span><span>学年から選ぶ <small>Choose by school grade</small></span></h2>
+      <div class="kj-tiles" id="kjGradeTiles"></div>
+    </div>
+    <div class="c-teal">
+      <h2><span class="bd"><svg class="ic"><use href="#i-award"/></svg></span><span>JLPTから選ぶ <small>Choose by JLPT level</small></span></h2>
+      <div class="kj-tiles" id="kjJlptTiles"></div>
+    </div>
+  </section>
 
-  <div class="kj-modal-foot" style="margin-top:40px;">
-    常用漢字・JIS X 0208 第1〜第2水準 合わせて 6357 字 ＋ ひらがな81字を収録。書き順データ: KanjiVG（CC BY-SA 3.0, © Ulrich Apel ほか）。読み方・意味・JLPTレベル: KANJIDIC2（EDRDG, CC BY-SA 4.0）および davidluzgouveia/kanji-data（JLPT区分は Jonathan Waller's JLPT Resources に基づく）。熟語・かな語データ: JMdict（EDRDG, CC BY-SA 4.0）。例文の多くは Tatoeba Project（CC BY 2.0 FR、田中コーパス由来）より選定し、収録が少ない漢字については編集部でオリジナル作成しました。
-    手書き認識モデル: DaKanji Single Kanji Recognition（CaptainDario, MIT License, ETL文字データベース＋KanjiVGで学習）を、このページ内でTensorFlow.jsにより実行しています（6,500字以上に対応、外部サーバー通信なし）。
-  </div>
+  <!-- ================= Results ================= -->
+  <section class="kj-results" id="kjResults" aria-live="polite">
+    <div class="kj-grid" id="kjGrid"></div>
+    <div class="kj-more" id="kjMore"></div>
+  </section>
+
+  <footer class="kj-credit">
+    <p>常用漢字・JIS X 0208 第1〜第2水準 合わせて 6357 字 ＋ ひらがな81字を収録。書き順データ: KanjiVG（CC BY-SA 3.0, © Ulrich Apel ほか）。読み方・意味・JLPTレベル: KANJIDIC2（EDRDG, CC BY-SA 4.0）および davidluzgouveia/kanji-data（JLPT区分は Jonathan Waller's JLPT Resources に基づく）。熟語・かな語データ: JMdict（EDRDG, CC BY-SA 4.0）。例文の多くは Tatoeba Project（CC BY 2.0 FR、田中コーパス由来）より選定し、収録が少ない漢字については編集部でオリジナル作成しました。</p>
+    <p>手書き認識モデル: DaKanji Single Kanji Recognition（CaptainDario, MIT License, ETL文字データベース＋KanjiVGで学習）を、このページ内でTensorFlow.jsにより実行しています（6,500字以上に対応、外部サーバー通信なし）。</p>
+    <p>Fonts: Klee One, Zen Maru Gothic (SIL Open Font License).</p>
+  </footer>
 </div>
 
+<!-- ================= Detail modal ================= -->
 <div class="kj-overlay" id="kjOverlay">
-  <div class="kj-modal">
-    <button class="close" id="kjModalClose">×</button>
-    <button class="star-btn" id="kjModalStar" title="お気に入りに登録">☆</button>
-    <button class="back" id="kjModalBack" style="display:none;">← 戻る</button>
-    <div class="kj-modal-top">
-      <div class="kj-modal-stage" id="kjStage">
-        <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
+  <div class="kj-modal" role="dialog" aria-modal="true" aria-label="漢字の詳細 / Kanji details">
+    <div class="kj-modal-bar">
+      <button class="kj-btn sm c-gray" id="kjModalBack" type="button" style="display:none;"><svg class="ic"><use href="#i-arrow-left"/></svg><span class="lb"><b>戻る</b><small>Back</small></span></button>
+      <div class="right">
+        <button class="kj-roundbtn c-yellow" id="kjModalStar" type="button" title="お気に入りに登録 / Add to favorites" aria-label="お気に入り / Favorite"><svg class="ic"><use href="#i-star"/></svg></button>
+        <button class="kj-roundbtn c-gray" id="kjModalClose" type="button" aria-label="閉じる / Close"><svg class="ic"><use href="#i-x"/></svg></button>
       </div>
-      <div class="kj-modal-info">
-        <div class="toprow">
-          <div class="kanji-big" id="kjModalKanjiTiny"></div>
-          <div class="jlpt-badge" id="kjModalJlpt"></div>
+    </div>
+
+    <div class="kj-modal-top">
+      <div class="kj-modal-left">
+        <div class="kj-modal-stage" id="kjStage"></div>
+        <div class="kj-modal-btns">
+          <button class="kj-btn solid c-red" id="kjReplay" type="button"><svg class="ic"><use href="#i-play"/></svg><span class="lb"><b>書き順をもう一度</b><small>Play again</small></span></button>
+          <button class="kj-btn c-orange" id="kjSlow" type="button"><svg class="ic"><use href="#i-turtle"/></svg><span class="lb"><b>ゆっくり再生</b><small>Slow</small></span></button>
+          <button class="kj-btn c-blue" id="kjCopyKanji" type="button"><svg class="ic"><use href="#i-copy"/></svg><span class="lb"><b>漢字をコピー</b><small>Copy</small></span></button>
         </div>
+      </div>
+
+      <div class="kj-modal-info">
         <div id="kjModalKanjiRows">
-          <div class="row"><span class="k">音読み</span><span class="v" id="kjModalOn"></span></div>
-          <div class="row"><span class="k">訓読み</span><span class="v" id="kjModalKun"></span></div>
-          <div class="row"><span class="k">意味（英語）</span><span class="v" id="kjModalMeaning"></span></div>
-          <div class="row"><span class="k">画数 ／ 部首</span><span class="v" id="kjModalStrokeRadical"></span></div>
-          <div class="row"><span class="k">学習学年</span><span class="v meaning-en" id="kjModalMeaningEn"></span></div>
+          <div class="kj-meaning"><span class="bd"><svg class="ic"><use href="#i-globe"/></svg></span>
+            <div><div class="k">意味 <small>Meaning</small></div><div class="v" id="kjModalMeaning"></div></div></div>
+          <div class="kj-tiles6" id="kjModalTiles"></div>
         </div>
         <div id="kjModalKanaRow" style="display:none;">
-          <div class="row"><span class="k">画数</span><span class="v" id="kjModalKanaStroke"></span></div>
+          <div class="kj-tiles6">
+            <div class="kj-info c-orange"><span class="bd"><svg class="ic"><use href="#i-hash"/></svg></span>
+              <div class="tx"><span class="k">画数 <small>Strokes</small></span><span class="v" id="kjModalKanaStroke"></span></div></div>
+            <div class="kj-info c-green"><span class="bd"><svg class="ic"><use href="#i-book"/></svg></span>
+              <div class="tx"><span class="k">種類 <small>Type</small></span><span class="v" id="kjModalKanaType">ひらがな</span></div></div>
+          </div>
         </div>
       </div>
     </div>
-    <div class="kj-example" id="kjModalExampleBox">
-      <span class="k">例文</span>
+
+    <div class="kj-box kj-example c-green" id="kjModalExampleBox">
+      <h3><span class="bd"><svg class="ic"><use href="#i-message"/></svg></span><span>例文 <small>Example</small></span></h3>
       <div class="ja" id="kjModalExJa"></div>
       <div class="en" id="kjModalExEn"></div>
     </div>
-    <div class="kj-modal-controls">
-      <button class="kj-btn" id="kjReplay">▶ 書き順をもう一度</button>
-      <button class="kj-btn ghost" id="kjSlow">ゆっくり再生</button>
-      <button class="kj-btn ghost" id="kjCopyKanji">⧉ 漢字をコピー</button>
-    </div>
-    <div class="kj-compounds" id="kjModalCompoundsBox">
-      <span class="k">この漢字を使った言葉</span>
+
+    <div class="kj-box kj-compounds c-orange" id="kjModalCompoundsBox">
+      <h3><span class="bd"><svg class="ic"><use href="#i-book-open"/></svg></span><span>この漢字を使った言葉 <small>Words with this kanji</small></span></h3>
       <div class="list" id="kjModalCompounds"></div>
     </div>
   </div>
 </div>
 
-<div class="kj-fs" id="kjFullscreen">
+<!-- ================= Fullscreen lesson mode ================= -->
+<div class="kj-fs" id="kjFullscreen" data-mode="normal">
   <div class="kj-fs-topbar">
     <div class="kj-fs-modeswitch">
-      <button class="kj-fs-modebtn active" data-mode="normal">通常表示</button>
-      <button class="kj-fs-modebtn" data-mode="reading">① 読み方学習</button>
-      <button class="kj-fs-modebtn" data-mode="writing">② 書き方学習</button>
+      <button class="kj-fs-modebtn active" type="button" data-mode="normal"><svg class="ic"><use href="#i-monitor"/></svg><span><b>通常表示</b><small>Normal</small></span></button>
+      <button class="kj-fs-modebtn" type="button" data-mode="reading"><svg class="ic"><use href="#i-volume"/></svg><span><b>① 読み方学習</b><small>Reading practice</small></span></button>
+      <button class="kj-fs-modebtn" type="button" data-mode="writing"><svg class="ic"><use href="#i-pen"/></svg><span><b>② 書き方学習</b><small>Writing practice</small></span></button>
     </div>
-    <button class="kj-fs-close" id="kjFsClose">✕ 閉じる（Esc）</button>
+    <div class="kj-fs-right">
+      <div>
+        <div class="size" role="group" aria-label="文字の大きさ / Text size">
+          <button type="button" id="kjFsSmaller" aria-label="小さく / Smaller">A−</button>
+          <output id="kjFsSizeOut">100%</output>
+          <button type="button" id="kjFsLarger" aria-label="大きく / Larger">A＋</button>
+        </div>
+      </div>
+      <button class="kj-btn c-gray" id="kjFsClose" type="button"><svg class="ic"><use href="#i-x"/></svg><span class="lb"><b>閉じる（Esc）</b><small>Close</small></span></button>
+    </div>
   </div>
 
   <div class="kj-fs-normal" id="kjFsNormal">
     <div class="kj-fs-glyph-col">
       <div class="kj-fs-stage" id="kjFsStage"></div>
       <div class="kj-fs-controls">
-        <button class="kj-fs-btn" id="kjFsReplay">▶ 書き順をもう一度</button>
-        <button class="kj-fs-btn ghost" id="kjFsSlow">ゆっくり再生</button>
-        <button class="kj-fs-btn ghost" id="kjFsCopy">⧉ 漢字をコピー</button>
-        <button class="kj-fs-btn ghost" id="kjFsStar">☆</button>
+        <button class="kj-btn solid c-red" id="kjFsReplay" type="button"><svg class="ic"><use href="#i-play"/></svg><span class="lb"><b>書き順をもう一度</b><small>Play again</small></span></button>
+        <button class="kj-btn c-orange" id="kjFsSlow" type="button"><svg class="ic"><use href="#i-turtle"/></svg><span class="lb"><b>ゆっくり再生</b><small>Slow</small></span></button>
+        <button class="kj-btn c-blue" id="kjFsCopy" type="button"><svg class="ic"><use href="#i-copy"/></svg><span class="lb"><b>漢字をコピー</b><small>Copy</small></span></button>
+        <button class="kj-btn c-yellow" id="kjFsStar" type="button" aria-label="お気に入り / Favorite"><svg class="ic"><use href="#i-star"/></svg><span class="lb"><b>お気に入り</b><small>Favorite</small></span></button>
       </div>
     </div>
     <div class="kj-fs-info">
-      <div class="kj-fs-toprow">
-        <div class="kj-fs-kanji-small" id="kjFsKanjiSmall"></div>
-        <div class="kj-fs-jlpt" id="kjFsJlpt"></div>
+      <div class="kj-meaning"><span class="bd"><svg class="ic"><use href="#i-globe"/></svg></span>
+        <div><div class="k">意味 <small>Meaning</small></div><div class="v" id="kjFsMeaning"></div></div></div>
+      <div class="kj-tiles6" id="kjFsTiles"></div>
+      <div class="kj-box kj-example c-green" id="kjFsExample" style="margin-top:14px;">
+        <h3><span class="bd"><svg class="ic"><use href="#i-message"/></svg></span><span>例文 <small>Example</small></span></h3>
+        <div class="ja" id="kjFsExJa"></div>
+        <div class="en" id="kjFsExEn"></div>
       </div>
-      <div class="kj-fs-row"><span class="k">音読み</span><span class="v" id="kjFsOn"></span></div>
-      <div class="kj-fs-row"><span class="k">訓読み</span><span class="v" id="kjFsKun"></span></div>
-      <div class="kj-fs-row"><span class="k">意味（英語）</span><span class="v" id="kjFsMeaning"></span></div>
-      <div class="kj-fs-row"><span class="k">画数／部首／学年</span><span class="v" id="kjFsStrokeRadical"></span></div>
-      <div class="kj-fs-example" id="kjFsExample"></div>
-      <div class="kj-fs-compounds">
-        <span class="k">この漢字を使った言葉</span>
+      <div class="kj-box kj-compounds c-orange">
+        <h3><span class="bd"><svg class="ic"><use href="#i-book-open"/></svg></span><span>この漢字を使った言葉 <small>Words with this kanji</small></span></h3>
         <div class="list" id="kjFsCompoundsList"></div>
       </div>
     </div>
