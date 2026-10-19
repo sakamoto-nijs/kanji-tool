@@ -387,6 +387,7 @@ function togglePanel(panelId, btnId){
 $('kjHomeLink').addEventListener('click', () => {
   closePanels(null);
   jukugoReset();
+  hwSetCount(1);
   if($('kjFullscreen').classList.contains('show')) closeFullscreen();
   closeModal();
   resetAll();
@@ -1117,15 +1118,69 @@ function createDrawPad(canvas, wrapEl){
 }
 
 
-/* ---- handwriting pad UI (single-kanji lookup) ---- */
+/* ---- handwriting pad UI: 1 letter = kanji lookup, 2-4 letters = word lookup ---- */
 const hwToggle = $('kjHwToggle');
 const hwPanel = $('kjHwPanel');
 let hwModelPreloadStarted = false;
 let hwPad = null;
+const hwState = { n:1, chars:[] };
+
+function renderHwProgress(){
+  const box = $('kjHwProgress');
+  box.innerHTML = '';
+  if(hwState.n === 1){ box.style.display = 'none'; return; }
+  box.style.display = 'flex';
+  for(let i = 0; i < hwState.n; i++){
+    const slot = document.createElement('div');
+    const filled = i < hwState.chars.length;
+    slot.className = 'slot' + (filled ? ' filled' : (i === hwState.chars.length ? ' current' : ''));
+    slot.textContent = filled ? hwState.chars[i] : '';
+    box.appendChild(slot);
+  }
+}
+
+/* Clear the letters written so far (keeps the chosen number of letters) */
+function hwResetWord(){
+  hwState.chars = [];
+  const wb = $('kjHwWordBox');
+  wb.style.display = 'none';
+  wb.innerHTML = '';
+  $('kjHwResults').innerHTML = '';
+  if(hwPad) hwPad.clear();
+  renderHwProgress();
+  $('kjHwRestart').style.display = hwState.n > 1 ? '' : 'none';
+  setHwStatus(hwState.n > 1 ? '1文字目を書いてください。 / Write letter 1.' : '', false);
+}
+
+function hwSetCount(n){
+  hwState.n = n;
+  document.querySelectorAll('#kjHwCountBox .kj-btn').forEach(b => {
+    const on = Number(b.dataset.n) === n;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+  hwResetWord();
+}
+
+function hwPickChar(ch){
+  hwState.chars.push(ch);
+  renderHwProgress();
+  $('kjHwResults').innerHTML = '';
+  if(hwPad) hwPad.clear();
+  if(hwState.chars.length >= hwState.n){
+    setHwStatus('', false);
+    jukugoLookup(hwState.chars.join(''), $('kjHwWordBox'), hwResetWord);
+  } else {
+    const next = hwState.chars.length + 1;
+    setHwStatus(next + '文字目を書いてください。 / Write letter ' + next + '.', false);
+  }
+}
+
 hwToggle.addEventListener('click', () => {
   const open = togglePanel('kjHwPanel', 'kjHwToggle');
   if(open){
     hwPad = createDrawPad($('kjHwCanvas'), document.querySelector('.kj-hw-canvas-wrap'));
+    hwResetWord();
     if(!hwModelPreloadStarted){
       hwModelPreloadStarted = true;
       loadDaKanjiModel().catch(err => {
@@ -1137,6 +1192,12 @@ hwToggle.addEventListener('click', () => {
   }
 });
 
+document.querySelectorAll('#kjHwCountBox .kj-btn').forEach(btn => {
+  btn.addEventListener('click', () => hwSetCount(Number(btn.dataset.n)));
+});
+
+$('kjHwRestart').addEventListener('click', hwResetWord);
+
 $('kjHwClear').onclick = () => {
   if(hwPad) hwPad.clear();
   setHwStatus('', false);
@@ -1145,6 +1206,10 @@ $('kjHwClear').onclick = () => {
 
 $('kjHwRecognize').onclick = async () => {
   const strokes = hwPad ? hwPad.getStrokes() : [];
+  if(hwState.n > 1 && hwState.chars.length >= hwState.n){
+    setHwStatus('「最初からやり直す」を押してください。 / Press “Start over” to search another word.', false);
+    return;
+  }
   if(strokes.length === 0){
     setHwStatus('まず枠の中に書いてください。 / Please write inside the box first.', false);
     return;
@@ -1155,7 +1220,7 @@ $('kjHwRecognize').onclick = async () => {
     const results = await recognizeCombined(strokes, hwPad.width, hwPad.height);
     setHwStatus('候補を表示しました（左ほど自信度が高い） / Results shown (most likely on the left)', false);
     const box = $('kjHwResults');
-    renderCandidateBox(box, results, openModal);
+    renderCandidateBox(box, results, hwState.n === 1 ? openModal : (match => hwPickChar(match.kanji)));
     if(!results.some(r => kanjiMap.has(r.char))){
       const note = document.createElement('div');
       note.className = 'kj-hw-note';
@@ -1187,36 +1252,18 @@ async function loadCompoundsIndex(){
   return compoundsIndexLoading;
 }
 
-const jukugoState = { totalChars: null, chars: [], pad: null };
-
 function jukugoWordHtml(word){
   return Array.from(word).map(ch => {
-    if(kanjiMap.has(ch)) return `<span class="wc link" data-kanji="${ch}">${ch}</span>`;
-    return `<span class="wc">${ch}</span>`;
+    if(kanjiMap.has(ch)) return `<span class="wc link" data-kanji="${esc(ch)}">${esc(ch)}</span>`;
+    return `<span class="wc">${esc(ch)}</span>`;
   }).join('');
 }
 
-function setJukugoStatus(text, loading){
-  const el = document.getElementById('kjJukugoStatus');
-  el.classList.toggle('loading', !!loading);
-  el.querySelector('.txt').textContent = text;
-}
-
-function renderJukugoProgress(){
-  const box = document.getElementById('kjJukugoProgress');
-  box.innerHTML = '';
-  for(let i=0;i<jukugoState.totalChars;i++){
-    const slot = document.createElement('div');
-    const filled = i < jukugoState.chars.length;
-    slot.className = 'slot' + (filled ? ' filled' : (i === jukugoState.chars.length ? ' current' : ''));
-    slot.textContent = filled ? jukugoState.chars[i] : '';
-    box.appendChild(slot);
-  }
-}
-
-async function jukugoLookup(word){
-  document.getElementById('kjJukugoBuild').style.display = 'none';
-  const resultBox = document.getElementById('kjJukugoResultBox');
+/* Look up a word and show the result in resultBox.
+   onAgain = what the "look up another word" button does (differs for the typed and the handwriting tools). */
+async function jukugoLookup(word, resultBox, onAgain){
+  resultBox = resultBox || $('kjJukugoResultBox');
+  onAgain = onAgain || jukugoReset;
   resultBox.style.display = 'block';
   resultBox.innerHTML = '<div class="notfound-msg">調べています…（初回は時間がかかります） / Searching… (the first time can take a while)</div>';
 
@@ -1226,71 +1273,39 @@ async function jukugoLookup(word){
     return;
   }
 
+  const againHtml = (cls) => `<button class="kj-btn ${cls} js-again" type="button"><svg class="ic"><use href="#i-rotate"/></svg><span class="lb"><b>別の言葉を調べる</b><small>Look up another word</small></span></button>`;
   const entries = index[word];
   if(entries && entries.length){
     resultBox.innerHTML = entries.map(e => `
       <div class="word">${jukugoWordHtml(e.display)}</div>
-      <div class="reading">${e.reading}</div>
-      <div class="gloss">${e.meaning_en}</div>
-    `).join('<div style="height:14px"></div>') + `
-      <button class="kj-btn sm c-gray" id="kjJukugoAgain" type="button" style="margin-top:8px;"><svg class="ic"><use href="#i-rotate"/></svg><span class="lb"><b>別の言葉を調べる</b><small>Look up another word</small></span></button>
-    `;
+      <div class="reading">${esc(e.reading)}</div>
+      <div class="gloss">${esc(e.meaning_en)}</div>
+    `).join('<div style="height:14px"></div>') + `<div style="margin-top:8px;">${againHtml('sm c-gray')}</div>`;
   } else {
     resultBox.innerHTML = `
       <div class="notfound-msg">「${esc(word)}」は現在のデータベースには見つかりませんでした。下のボタンでコピーして、他の辞書で調べることができます。<br>“${esc(word)}” was not found. You can copy it with the button below and look it up in another dictionary.</div>
       <div class="notfound-word">${esc(word)}</div>
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
-        <button class="kj-btn c-blue" id="kjJukugoCopy" type="button"><svg class="ic"><use href="#i-copy"/></svg><span class="lb"><b>この言葉をコピー</b><small>Copy this word</small></span></button>
-        <button class="kj-btn c-gray" id="kjJukugoAgain" type="button"><svg class="ic"><use href="#i-rotate"/></svg><span class="lb"><b>別の言葉を調べる</b><small>Look up another word</small></span></button>
+        <button class="kj-btn c-blue js-copy" type="button"><svg class="ic"><use href="#i-copy"/></svg><span class="lb"><b>この言葉をコピー</b><small>Copy this word</small></span></button>
+        ${againHtml('c-gray')}
       </div>
     `;
-    document.getElementById('kjJukugoCopy').onclick = () => copyTextToClipboard(word, document.getElementById('kjJukugoCopy'));
+    const copyBtn = resultBox.querySelector('.js-copy');
+    copyBtn.onclick = () => copyTextToClipboard(word, copyBtn);
   }
-  const againBtn = document.getElementById('kjJukugoAgain');
-  if(againBtn) againBtn.onclick = jukugoReset;
+  const againBtn = resultBox.querySelector('.js-again');
+  if(againBtn) againBtn.onclick = onAgain;
+  resultBox.scrollIntoView({ behavior:'smooth', block:'nearest' }); // make sure the result is on screen (the handwriting panel is tall on phones)
 }
 
-function jukugoStartCount(n){
-  jukugoState.totalChars = n;
-  jukugoState.chars = [];
-  document.querySelectorAll('#kjJukugoCountBox .kj-btn').forEach(b => b.classList.toggle('on', Number(b.dataset.n) === n));
-  document.getElementById('kjJukugoResultBox').style.display = 'none';
-  document.getElementById('kjJukugoBuild').style.display = 'block';
-  renderJukugoProgress();
-  jukugoState.pad = createDrawPad(document.getElementById('kjJukugoCanvas'), document.querySelector('#kjJukugoBuild .kj-jk-canvas-wrap'));
-  document.getElementById('kjJukugoResults').innerHTML = '';
-  setJukugoStatus('1文字目を書いてください。 / Write letter 1.', false);
-  loadDaKanjiModel().catch(()=>{});
-  loadKanjiCanvasRefPatterns().catch(()=>{});
-}
-
-function jukugoPickChar(kanjiChar){
-  jukugoState.chars.push(kanjiChar);
-  renderJukugoProgress();
-  document.getElementById('kjJukugoResults').innerHTML = '';
-  if(jukugoState.pad) jukugoState.pad.clear();
-
-  if(jukugoState.chars.length >= jukugoState.totalChars){
-    const word = jukugoState.chars.join('');
-    jukugoLookup(word);
-  } else {
-    setJukugoStatus((jukugoState.chars.length+1) + '文字目を書いてください。 / Write letter ' + (jukugoState.chars.length+1) + '.', false);
-  }
-}
-
+/* Reset the typed-word tool */
 function jukugoReset(){
-  jukugoState.totalChars = null;
-  jukugoState.chars = [];
-  jukugoState.pad = null;
-  document.querySelectorAll('#kjJukugoCountBox .kj-btn').forEach(b => b.classList.remove('on'));
-  document.getElementById('kjJukugoBuild').style.display = 'none';
-  document.getElementById('kjJukugoResultBox').style.display = 'none';
-  document.getElementById('kjJukugoResultBox').innerHTML = '';
-  document.getElementById('kjJukugoInput').value = '';
+  $('kjJukugoResultBox').style.display = 'none';
+  $('kjJukugoResultBox').innerHTML = '';
+  $('kjJukugoInput').value = '';
 }
 
-const jukugoToggle = document.getElementById('kjJukugoToggle');
-const jukugoPanel = document.getElementById('kjJukugoPanel');
+const jukugoToggle = $('kjJukugoToggle');
 jukugoToggle.addEventListener('click', () => {
   const open = togglePanel('kjJukugoPanel', 'kjJukugoToggle');
   if(open){
@@ -1298,50 +1313,19 @@ jukugoToggle.addEventListener('click', () => {
   }
 });
 
-document.querySelectorAll('#kjJukugoCountBox .kj-btn').forEach(btn => {
-  btn.addEventListener('click', () => jukugoStartCount(Number(btn.dataset.n)));
-});
-
-document.getElementById('kjJukugoRestart').addEventListener('click', jukugoReset);
-
-document.getElementById('kjJukugoClear').addEventListener('click', () => {
-  if(jukugoState.pad) jukugoState.pad.clear();
-  document.getElementById('kjJukugoResults').innerHTML = '';
-  setJukugoStatus('', false);
-});
-
-document.getElementById('kjJukugoRecognize').addEventListener('click', async () => {
-  const strokes = jukugoState.pad ? jukugoState.pad.getStrokes() : [];
-  if(strokes.length === 0){
-    setJukugoStatus('まず枠の中に書いてください。 / Please write inside the box first.', false);
-    return;
-  }
-  setJukugoStatus('認識しています… / Recognizing…', true);
-  document.getElementById('kjJukugoRecognize').disabled = true;
-  try{
-    const results = await recognizeCombined(strokes, jukugoState.pad.width, jukugoState.pad.height);
-    setJukugoStatus('候補を表示しました（左ほど自信度が高い） / Results shown (most likely on the left)', false);
-    const box = document.getElementById('kjJukugoResults');
-    renderCandidateBox(box, results, match => jukugoPickChar(match.kanji));
-  } catch(err){
-    console.error(err);
-    setJukugoStatus('認識中にエラーが発生しました。 / An error happened.', false);
-  } finally {
-    document.getElementById('kjJukugoRecognize').disabled = false;
-  }
-});
-
-document.getElementById('kjJukugoResultBox').addEventListener('click', e => {
-  const el = e.target.closest('.wc.link');
-  if(!el) return;
-  const entry = kanjiMap.get(el.dataset.kanji);
-  if(entry) openModal(entry);
+/* Clicking a kanji inside a word result opens that kanji's page */
+['kjJukugoResultBox', 'kjHwWordBox'].forEach(id => {
+  $(id).addEventListener('click', e => {
+    const el = e.target.closest('.wc.link');
+    if(!el) return;
+    const entry = kanjiMap.get(el.dataset.kanji);
+    if(entry) openModal(entry);
+  });
 });
 
 function jukugoTypeSearch(){
   const word = document.getElementById('kjJukugoInput').value.trim();
   if(!word) return;
-  document.getElementById('kjJukugoBuild').style.display = 'none';
   jukugoLookup(word);
 }
 document.getElementById('kjJukugoTypeSearch').addEventListener('click', jukugoTypeSearch);
