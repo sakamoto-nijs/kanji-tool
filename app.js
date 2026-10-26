@@ -531,8 +531,12 @@ function setStarButton(btn, isFav){
   btn.title = isFav ? 'お気に入りから削除 / Remove from favorites' : 'お気に入りに登録 / Add to favorites';
 }
 
+/* 書き順の練習（practice.js）を閉じる。まだ読み込まれていなくても安全。 */
+function stopPractice(){ if(window.Practice) window.Practice.unmount(); }
+
 function openModal(k, opts){
   opts = opts || {};
+  stopPractice();
   if(k.isKana){
     renderKanaModal(k, opts);
     return;
@@ -552,6 +556,7 @@ function openModal(k, opts){
   if(modalEl) modalEl.scrollTop = 0;
   $('kjModalKanjiRows').style.display = '';
   $('kjModalKanaRow').style.display = 'none';
+  $('kjPracOpen').style.display = '';
   $('kjModalCompoundsBox').style.display = '';
 
   $('kjModalMeaning').textContent = k.meanings_en.join(', ');
@@ -593,6 +598,7 @@ function openModal(k, opts){
    meaning, JLPT, example sentence, or compounds, since none of that applies. */
 function renderKanaModal(k, opts){
   opts = opts || {};
+  stopPractice();
   if(!opts.fromHistory){
     modalHistory = [];
   }
@@ -603,6 +609,7 @@ function renderKanaModal(k, opts){
   if(modalEl) modalEl.scrollTop = 0;
   $('kjModalKanjiRows').style.display = 'none';
   $('kjModalKanaRow').style.display = '';
+  $('kjPracOpen').style.display = 'none';
   $('kjModalExampleBox').style.display = 'none';
   $('kjModalCompoundsBox').style.display = 'none';
   $('kjModalKanaStroke').innerHTML = `${k.strokeCount}<span class="sub"> 画</span>`;
@@ -691,7 +698,7 @@ $('kjModalBack').addEventListener('click', () => {
   const prev = modalHistory.pop();
   if(prev) openModal(prev, {fromHistory:true});
 });
-function closeModal(){ $('kjOverlay').classList.remove('show'); }
+function closeModal(){ stopPractice(); $('kjOverlay').classList.remove('show'); }
 document.addEventListener('keydown', e => {
   if(e.key !== 'Escape') return;
   if($('kjFullscreen').classList.contains('show')) closeFullscreen();
@@ -728,6 +735,7 @@ function setFsMode(mode){
 }
 
 function openFullscreen(k){
+  stopPractice();
   fsCurrentKanji = k;
   fsSelectedWord = null;
   fsRevealed = false;
@@ -745,6 +753,7 @@ function openFullscreen(k){
 }
 
 function closeFullscreen(){
+  stopPractice();
   $('kjFullscreen').classList.remove('show');
   document.body.style.overflow = '';
 }
@@ -752,6 +761,7 @@ function closeFullscreen(){
 $('kjFsClose').addEventListener('click', closeFullscreen);
 
 function renderFsNormal(k){
+  stopPractice();
   $('kjFsMeaning').textContent = k.meanings_en.join(', ');
   renderInfoTiles($('kjFsTiles'), k);
 
