@@ -81,7 +81,7 @@
       '<div class="kj-prac-foot">' +
       '<div class="kj-prac-tabs" role="group" aria-label="練習の種類 / Mode">' +
       BTN('c-blue', 'pen', 'なぞる', 'Trace', 'data-mode="trace"') +
-      BTN('c-purple', 'check', 'れんしゅう', 'Practice', 'data-mode="practice"') + '</div>' +
+      BTN('c-purple', 'target', 'れんしゅう', 'Practice', 'data-mode="practice"') + '</div>' +
       '<p class="kj-prac-note">1画は、ペンを離さずに書く。 One stroke = write without lifting your pen.</p>' +
       '<p class="kj-prac-credit">書き順データ / Stroke data: KanjiVG (CC BY-SA 3.0)</p>' +
       '</div>';
