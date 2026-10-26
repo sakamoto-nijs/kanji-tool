@@ -265,22 +265,25 @@
   .kj-modal-stage::after{ content:""; position:absolute; top:50%; left:0; right:0; border-top:2px dashed var(--line); }
   .kj-modal-stage svg{ position:absolute; inset:0; width:100%; height:100%; z-index:1; }
   .kj-modal-stage .kanji-glyph path{ stroke-width:3.4; }
-  /* ---- 書き順の練習（kj-prac-） ---- */
-  .kj-prac{ width:100%; max-width:380px; margin:0 auto; display:flex; flex-direction:column; align-items:center; gap:10px; }
-  .kj-prac-head{ width:100%; display:flex; align-items:center; justify-content:space-between; gap:10px; }
-  .kj-prac-title{ display:flex; align-items:baseline; gap:8px; font-weight:900; color:var(--ink-soft); }
-  .kj-prac-title small{ font-size:.7rem; font-weight:700; }
-  .kj-prac-k{ font-family:'Klee One',serif; font-size:2rem; line-height:1; color:var(--ink); }
-  .kj-prac-tabs{ display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
-  .kj-prac-box{ width:min(100%,340px); aspect-ratio:1/1; border:3px solid var(--red-bd); border-radius:24px; background:var(--stroke-bg); overflow:hidden; }
-  .kj-prac-svg{ display:block; width:100%; height:100%; touch-action:none; user-select:none; -webkit-user-select:none; cursor:crosshair; }
-  .kj-prac-msg{ min-height:2.6em; text-align:center; font-size:1rem; display:flex; flex-direction:column; justify-content:center; }
-  .kj-prac-msg small{ font-size:.72rem; font-weight:700; color:var(--ink-soft); }
-  .kj-prac-msg.bad b{ color:#DC2626; }
+  /* ---- 書き順の練習（kj-prac-）：練習する漢字だけを大きく出す全画面 ---- */
+  .kj-prac{ display:none; position:fixed; inset:0; z-index:300; background:var(--bg); flex-direction:column; align-items:center; overflow-y:auto; font-family:var(--font-kl); }
+  .kj-prac-bar{ width:100%; max-width:760px; display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 16px 0; flex:none; }
+  .kj-prac-progress{ font-weight:900; color:var(--ink-soft); font-size:1rem; }
+  .kj-prac-main{ width:100%; flex:1 0 auto; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; padding:8px 16px; }
+  .kj-prac-help{ text-align:center; font-size:1rem; line-height:1.6; color:var(--ink-soft); font-weight:700; }
+  .kj-prac-help small{ display:block; font-size:.78rem; font-weight:500; }
+  .kj-prac-box{ width:max(240px,min(94vw,calc(100dvh - 370px),640px)); aspect-ratio:1/1; background:#fff; border:3px solid var(--green-bd); border-radius:24px; box-shadow:var(--shadow); touch-action:none; user-select:none; -webkit-user-select:none; cursor:crosshair; position:relative; flex:none; }
+  .kj-prac-svg{ display:block; width:100%; height:100%; pointer-events:none; }
+  .kj-prac-msg{ min-height:3.2em; text-align:center; font-size:1.05rem; display:flex; flex-direction:column; justify-content:center; line-height:1.5; }
+  .kj-prac-msg small{ font-size:.78rem; font-weight:700; color:var(--ink-soft); }
+  .kj-prac-msg.bad b{ color:var(--red); }
   .kj-prac-msg.good b{ color:var(--green); }
-  .kj-prac-btns{ display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
-  .kj-prac-note{ margin:0; font-size:.82rem; font-weight:700; color:var(--ink-soft); text-align:center; line-height:1.5; }
-  .kj-prac-note small{ display:block; font-size:.7rem; font-weight:500; }
+  .kj-prac-finish .big{ font-size:1.9rem; font-weight:900; color:var(--green); }
+  .kj-prac-finish .en{ font-size:1rem; color:var(--ink-soft); font-weight:700; }
+  .kj-prac-btns{ display:flex; gap:10px; flex-wrap:wrap; justify-content:center; }
+  .kj-prac-foot{ width:100%; flex:none; display:flex; flex-direction:column; align-items:center; gap:6px; padding:10px 16px 16px; border-top:2px solid var(--line); background:var(--surface); }
+  .kj-prac-tabs{ display:flex; gap:10px; flex-wrap:wrap; justify-content:center; }
+  .kj-prac-note{ margin:0; font-size:.74rem; font-weight:700; color:var(--ink-soft); text-align:center; }
   .kj-prac-credit{ margin:0; font-size:.68rem; color:var(--ink-soft); text-align:center; }
   .kj-modal-btns{ display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
   .kj-meaning{ display:flex; align-items:center; gap:12px; background:var(--teal-soft); border:2px solid var(--teal-bd); border-radius:20px; padding:10px 16px; margin-bottom:12px; }
@@ -633,7 +636,6 @@
           <button class="kj-btn c-blue" id="kjCopyKanji" type="button"><svg class="ic"><use href="#i-copy"/></svg><span class="lb"><b>漢字をコピー</b><small>Copy</small></span></button>
           <button class="kj-btn solid c-green" id="kjPracOpen" type="button"><svg class="ic"><use href="#i-pen"/></svg><span class="lb"><b>書き順を練習</b><small>Practice writing</small></span></button>
         </div>
-        <div class="kj-prac" id="kjPracModal" style="display:none;"></div>
       </div>
 
       <div class="kj-modal-info">
@@ -696,7 +698,6 @@
         <button class="kj-btn c-yellow" id="kjFsStar" type="button" aria-label="お気に入り / Favorite"><svg class="ic"><use href="#i-star"/></svg><span class="lb"><b>お気に入り</b><small>Favorite</small></span></button>
         <button class="kj-btn solid c-green" id="kjFsPracOpen" type="button"><svg class="ic"><use href="#i-pen"/></svg><span class="lb"><b>書き順を練習</b><small>Practice writing</small></span></button>
       </div>
-      <div class="kj-prac" id="kjPracFs" style="display:none;"></div>
     </div>
     <div class="kj-fs-info">
       <div class="kj-meaning"><span class="bd"><svg class="ic"><use href="#i-globe"/></svg></span>
@@ -723,6 +724,9 @@
     <div class="kj-fs-wordlist" id="kjFsWordList"></div>
   </div>
 </div>
+
+<!-- ================= Stroke practice (full screen) ================= -->
+<div class="kj-prac" id="kjPrac" role="dialog" aria-modal="true" aria-label="書き順の練習 / Stroke practice"></div>
 
 <script src="./strokeOrder.js"></script>
 <script src="./app.js"></script>
