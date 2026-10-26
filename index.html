@@ -265,6 +265,23 @@
   .kj-modal-stage::after{ content:""; position:absolute; top:50%; left:0; right:0; border-top:2px dashed var(--line); }
   .kj-modal-stage svg{ position:absolute; inset:0; width:100%; height:100%; z-index:1; }
   .kj-modal-stage .kanji-glyph path{ stroke-width:3.4; }
+  /* ---- 書き順の練習（kj-prac-） ---- */
+  .kj-prac{ width:100%; max-width:380px; margin:0 auto; display:flex; flex-direction:column; align-items:center; gap:10px; }
+  .kj-prac-head{ width:100%; display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .kj-prac-title{ display:flex; align-items:baseline; gap:8px; font-weight:900; color:var(--ink-soft); }
+  .kj-prac-title small{ font-size:.7rem; font-weight:700; }
+  .kj-prac-k{ font-family:'Klee One',serif; font-size:2rem; line-height:1; color:var(--ink); }
+  .kj-prac-tabs{ display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
+  .kj-prac-box{ width:min(100%,340px); aspect-ratio:1/1; border:3px solid var(--red-bd); border-radius:24px; background:var(--stroke-bg); overflow:hidden; }
+  .kj-prac-svg{ display:block; width:100%; height:100%; touch-action:none; user-select:none; -webkit-user-select:none; cursor:crosshair; }
+  .kj-prac-msg{ min-height:2.6em; text-align:center; font-size:1rem; display:flex; flex-direction:column; justify-content:center; }
+  .kj-prac-msg small{ font-size:.72rem; font-weight:700; color:var(--ink-soft); }
+  .kj-prac-msg.bad b{ color:#DC2626; }
+  .kj-prac-msg.good b{ color:var(--green); }
+  .kj-prac-btns{ display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
+  .kj-prac-note{ margin:0; font-size:.82rem; font-weight:700; color:var(--ink-soft); text-align:center; line-height:1.5; }
+  .kj-prac-note small{ display:block; font-size:.7rem; font-weight:500; }
+  .kj-prac-credit{ margin:0; font-size:.68rem; color:var(--ink-soft); text-align:center; }
   .kj-modal-btns{ display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
   .kj-meaning{ display:flex; align-items:center; gap:12px; background:var(--teal-soft); border:2px solid var(--teal-bd); border-radius:20px; padding:10px 16px; margin-bottom:12px; }
   .kj-meaning .bd{ width:44px; height:44px; border-radius:50%; background:var(--teal); color:var(--teal-on); display:grid; place-items:center; flex:none; }
@@ -614,7 +631,9 @@
           <button class="kj-btn solid c-red" id="kjReplay" type="button"><svg class="ic"><use href="#i-play"/></svg><span class="lb"><b>書き順をもう一度</b><small>Play again</small></span></button>
           <button class="kj-btn c-orange" id="kjSlow" type="button"><svg class="ic"><use href="#i-turtle"/></svg><span class="lb"><b>ゆっくり再生</b><small>Slow</small></span></button>
           <button class="kj-btn c-blue" id="kjCopyKanji" type="button"><svg class="ic"><use href="#i-copy"/></svg><span class="lb"><b>漢字をコピー</b><small>Copy</small></span></button>
+          <button class="kj-btn solid c-green" id="kjPracOpen" type="button"><svg class="ic"><use href="#i-pen"/></svg><span class="lb"><b>書き順を練習</b><small>Practice writing</small></span></button>
         </div>
+        <div class="kj-prac" id="kjPracModal" style="display:none;"></div>
       </div>
 
       <div class="kj-modal-info">
@@ -675,7 +694,9 @@
         <button class="kj-btn c-orange" id="kjFsSlow" type="button"><svg class="ic"><use href="#i-turtle"/></svg><span class="lb"><b>ゆっくり再生</b><small>Slow</small></span></button>
         <button class="kj-btn c-blue" id="kjFsCopy" type="button"><svg class="ic"><use href="#i-copy"/></svg><span class="lb"><b>漢字をコピー</b><small>Copy</small></span></button>
         <button class="kj-btn c-yellow" id="kjFsStar" type="button" aria-label="お気に入り / Favorite"><svg class="ic"><use href="#i-star"/></svg><span class="lb"><b>お気に入り</b><small>Favorite</small></span></button>
+        <button class="kj-btn solid c-green" id="kjFsPracOpen" type="button"><svg class="ic"><use href="#i-pen"/></svg><span class="lb"><b>書き順を練習</b><small>Practice writing</small></span></button>
       </div>
+      <div class="kj-prac" id="kjPracFs" style="display:none;"></div>
     </div>
     <div class="kj-fs-info">
       <div class="kj-meaning"><span class="bd"><svg class="ic"><use href="#i-globe"/></svg></span>
@@ -703,6 +724,8 @@
   </div>
 </div>
 
+<script src="./strokeOrder.js"></script>
 <script src="./app.js"></script>
+<script src="./practice.js"></script>
 </body>
 </html>
