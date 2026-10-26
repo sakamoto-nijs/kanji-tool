@@ -1,13 +1,16 @@
 /* practice.js — 書き順の練習画面（なぞる / れんしゅう）
-   詳細モーダルと全画面の通常表示の、両方から使う共通の部品。
+   「書き順を練習」ボタンを押すと、練習する漢字だけを大きく出す全画面になる。
    strokeOrder.js（判定）と app.js（playAnimation / state / openModal など）のあとに読み込む。
-   データの保存・外部への通信・音はなし。 */
+   データの保存・外部への通信はなし。音は sound/correct.mp3 と sound/incorrect.mp3 を使う。 */
 (function () {
   'use strict';
   var NS = 'http://www.w3.org/2000/svg';
-  var COL = { guide: '#E2E8F0', model: '#CBD5E1', ink: '#1F2A22', wrong: '#DC2626', hint: '#F59E0B' };
+  var COL = { guide: '#E2E8F0', model: '#CBD5E1', accent: '#15803D', accentDark: '#166534', wrong: '#DC2626', hint: '#F59E0B' };
+  var SOUND = { ok: 'sound/correct.mp3', ng: 'sound/incorrect.mp3' };
 
-  var cur = null; // いま開いている練習 { where, host, k, mode, cleanups, ... }
+  var cur = null;          // いま開いている練習の状態
+  var sounds = {};
+  var bodyOverflow = '';
 
   function el(name, attrs) {
     var e = document.createElementNS(NS, name);
@@ -17,107 +20,120 @@
   function ptsToD(pts) {
     return pts.map(function (p, i) { return (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1); }).join(' ');
   }
-  function polyD(pts) { return ptsToD(pts); }
-
-  function nextKanji(k) {
-    var list = (typeof state !== 'undefined' && state.filtered) || [];
-    for (var i = 0; i < list.length; i++) {
-      if (list[i].kanji === k.kanji) return i + 1 < list.length ? list[i + 1] : false; // false = 最後
-    }
-    return null; // 一覧にない
+  function play(which) {
+    try {
+      if (!sounds[which]) sounds[which] = new Audio(SOUND[which]);
+      var a = sounds[which];
+      a.currentTime = 0;
+      var p = a.play();
+      if (p && p.catch) p.catch(function () { /* 音が出せなくても何もしない */ });
+    } catch (e) { /* 何もしない */ }
   }
-
-  var BTN = function (cls, ic, jp, en, extra) {
+  function BTN(cls, ic, jp, en, extra) {
     return '<button type="button" class="kj-btn ' + cls + '" ' + (extra || '') + '>' +
       '<svg class="ic"><use href="#i-' + ic + '"/></svg><span class="lb"><b>' + jp + '</b><small>' + en + '</small></span></button>';
-  };
-
-  function where(w) {
-    if (w === 'modal') return { host: document.getElementById('kjPracModal'), hide: [document.getElementById('kjStage'), document.querySelector('.kj-modal-btns')] };
-    return { host: document.getElementById('kjPracFs'), hide: [document.getElementById('kjFsStage'), document.querySelector('.kj-fs-controls')] };
   }
+
+  /* いまの検索結果（state.filtered）の中での位置。{ index, total } か、一覧にないときは null */
+  function listPos(k) {
+    var list = (typeof state !== 'undefined' && state.filtered) || [];
+    for (var i = 0; i < list.length; i++) if (list[i].kanji === k.kanji) return { index: i, total: list.length, list: list };
+    return null;
+  }
+
+  function overlay() { return document.getElementById('kjPrac'); }
 
   function unmount() {
     if (!cur) return;
-    cur.cleanups.forEach(function (f) { try { f(); } catch (e) { /* ignore */ } });
-    var w = where(cur.where);
-    w.host.innerHTML = '';
-    w.host.style.display = 'none';
-    w.hide.forEach(function (n) { if (n) n.style.display = ''; });
+    (cur.timers || []).forEach(clearTimeout);
+    var o = overlay();
+    o.innerHTML = '';
+    o.style.display = 'none';
+    document.body.style.overflow = bodyOverflow;
     cur = null;
   }
 
-  function mount(whereName, k, mode) {
+  /* k: 練習する漢字、from: 'modal' か 'fs'（もとの画面）、mode: 'trace' か 'practice' */
+  function mount(k, from, mode) {
+    var keepOverflow = cur ? bodyOverflow : document.body.style.overflow;
     unmount();
     if (!k || k.isKana || !window.StrokeOrder) return;
-    var w = where(whereName);
-    var polys = StrokeOrder.strokesToPolylines(k.strokes);
+    bodyOverflow = keepOverflow;
+    document.body.style.overflow = 'hidden';
     var S = {
-      where: whereName, k: k, mode: mode || 'trace', polys: polys, cleanups: [],
-      accepted: 0, mistakes: 0, done: false, animating: false,
-      drawing: null, userStrokes: []
+      k: k, from: from, mode: mode || 'trace', polys: StrokeOrder.strokesToPolylines(k.strokes),
+      accepted: 0, mistakes: 0, done: false, animating: false, drawing: null, timers: [], finished: false
     };
     cur = S;
-    w.hide.forEach(function (n) { if (n) n.style.display = 'none'; });
-    w.host.style.display = '';
-    w.host.innerHTML =
-      '<div class="kj-prac-head">' + BTN('sm c-gray', 'arrow-left', 'もどる', 'Back', 'data-act="back"') +
-      '<div class="kj-prac-title"><span class="kj-prac-k">' + k.kanji + '</span><span>' + k.strokeCount + ' 画 <small>strokes</small></span></div></div>' +
+    var pos = listPos(k);
+    var o = overlay();
+    o.style.display = 'flex';
+    o.scrollTop = 0;
+    o.innerHTML =
+      '<div class="kj-prac-bar">' + BTN('sm c-gray', 'arrow-left', 'もどる', 'Back', 'data-act="back"') +
+      '<div class="kj-prac-progress">' + (pos ? (pos.index + 1) + ' / ' + pos.total : '') + '</div></div>' +
+      '<div class="kj-prac-main">' +
+      '<div class="kj-prac-help" aria-live="polite"></div>' +
+      '<div class="kj-prac-box"><svg class="kj-prac-svg" viewBox="0 0 109 109" aria-label="' + k.kanji + ' の書き順 / Stroke order of ' + k.kanji + '"></svg></div>' +
+      '<div class="kj-prac-msg" aria-live="polite"></div>' +
+      '<div class="kj-prac-btns"></div>' +
+      '</div>' +
+      '<div class="kj-prac-foot">' +
       '<div class="kj-prac-tabs" role="group" aria-label="練習の種類 / Mode">' +
       BTN('c-blue', 'pen', 'なぞる', 'Trace', 'data-mode="trace"') +
       BTN('c-purple', 'check', 'れんしゅう', 'Practice', 'data-mode="practice"') + '</div>' +
-      '<div class="kj-prac-box"><svg class="kj-prac-svg" viewBox="0 0 109 109" aria-label="書く場所 / Writing area"></svg></div>' +
-      '<div class="kj-prac-msg" aria-live="polite"></div>' +
-      '<div class="kj-prac-btns"></div>' +
-      '<p class="kj-prac-note">1画は、ペンを離さずに書く。<small>One stroke = write without lifting your pen.</small></p>' +
-      '<p class="kj-prac-note">見るのは、場所・向き・長さです。とめ・はね・はらいは見ません。<small>We check position, direction and length. We do not check stops, hooks or sweeps.</small></p>' +
-      '<p class="kj-prac-credit">書き順データ / Stroke data: KanjiVG (CC BY-SA 3.0)</p>';
-    S.host = w.host;
-    S.svg = w.host.querySelector('.kj-prac-svg');
-    S.msg = w.host.querySelector('.kj-prac-msg');
-    S.btns = w.host.querySelector('.kj-prac-btns');
-
-    w.host.querySelector('[data-act="back"]').onclick = unmount;
-    w.host.querySelectorAll('[data-mode]').forEach(function (b) {
+      '<p class="kj-prac-note">1画は、ペンを離さずに書く。 One stroke = write without lifting your pen.</p>' +
+      '<p class="kj-prac-credit">書き順データ / Stroke data: KanjiVG (CC BY-SA 3.0)</p>' +
+      '</div>';
+    S.box = o.querySelector('.kj-prac-box');
+    S.svg = o.querySelector('.kj-prac-svg');
+    S.msg = o.querySelector('.kj-prac-msg');
+    S.help = o.querySelector('.kj-prac-help');
+    S.btns = o.querySelector('.kj-prac-btns');
+    o.querySelector('[data-act="back"]').onclick = unmount;
+    o.querySelectorAll('[data-mode]').forEach(function (b) {
       b.onclick = function () { S.mode = b.dataset.mode; reset(S); };
     });
     bindPointer(S);
     reset(S);
-    var first = w.host.querySelector('[data-mode="' + S.mode + '"]');
-    if (first && first.scrollIntoView) { /* 画面内に収まるようにする */ w.host.scrollIntoView({ block: 'nearest' }); }
   }
 
   /* ---------- 描く場所を作り直す ---------- */
   function reset(S) {
-    (S.timers || []).forEach(clearTimeout);
-    S.timers = [];
-    S.accepted = 0; S.mistakes = 0; S.done = false; S.animating = false; S.drawing = null; S.userStrokes = [];
-    S.host.querySelectorAll('[data-mode]').forEach(function (b) { b.classList.toggle('on', b.dataset.mode === S.mode); b.setAttribute('aria-pressed', b.dataset.mode === S.mode ? 'true' : 'false'); });
+    S.timers.forEach(clearTimeout); S.timers = [];
+    S.accepted = 0; S.mistakes = 0; S.done = false; S.animating = false; S.drawing = null; S.finished = false;
+    var o = overlay();
+    S.box.style.display = '';
+    o.querySelectorAll('[data-mode]').forEach(function (b) {
+      b.classList.toggle('on', b.dataset.mode === S.mode);
+      b.setAttribute('aria-pressed', b.dataset.mode === S.mode ? 'true' : 'false');
+    });
     var svg = S.svg;
     while (svg.firstChild) svg.removeChild(svg.firstChild);
-    // 十字のガイド
     var g0 = el('g', { stroke: COL.guide, 'stroke-width': 0.8, 'stroke-dasharray': '3 3', fill: 'none' });
-    g0.appendChild(el('line', { x1: 54.5, y1: 0, x2: 54.5, y2: 109 }));
-    g0.appendChild(el('line', { x1: 0, y1: 54.5, x2: 109, y2: 54.5 }));
+    g0.appendChild(el('line', { x1: 54.5, y1: 2, x2: 54.5, y2: 107 }));
+    g0.appendChild(el('line', { x1: 2, y1: 54.5, x2: 107, y2: 54.5 }));
     svg.appendChild(g0);
-    S.gModel = el('g', {}); S.gDone = el('g', {}); S.gHint = el('g', {}); S.gUser = el('g', {}); S.gAnim = el('g', {});
-    [S.gModel, S.gDone, S.gHint, S.gUser, S.gAnim].forEach(function (g) { svg.appendChild(g); });
-    if (S.mode === 'trace') {
-      S.k.strokes.forEach(function (d) {
-        S.gModel.appendChild(el('path', { d: d, fill: 'none', stroke: COL.model, 'stroke-width': S.k.strokeCount >= 12 ? 4.5 : 7, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
-      });
+    // うすいグレーの手本は、なぞる・れんしゅうのどちらでも出す
+    var gm = el('g', {});
+    var w = S.k.strokeCount >= 10 ? 5 : 7;
+    S.k.strokes.forEach(function (d) {
+      gm.appendChild(el('path', { d: d, fill: 'none', stroke: COL.model, 'stroke-width': w, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
+    });
+    svg.appendChild(gm);
+    if (S.mode === 'trace') {      // 書き順の番号は、なぞるだけ
       S.polys.forEach(function (p, i) {
-        S.gModel.appendChild(el('circle', { cx: p[0][0], cy: p[0][1], r: 4, fill: '#fff', stroke: '#64748B', 'stroke-width': 0.8 }));
-        var t = el('text', { x: p[0][0], y: p[0][1] + 1.6, 'text-anchor': 'middle', 'font-size': 4.6, 'font-weight': 700, fill: '#334155' });
-        t.textContent = String(i + 1); S.gModel.appendChild(t);
+        gm.appendChild(el('circle', { cx: p[0][0], cy: p[0][1], r: 4, fill: COL.accent }));
+        var t = el('text', { x: p[0][0], y: p[0][1] + 2, 'text-anchor': 'middle', 'font-size': 5.5, 'font-weight': 700, fill: '#fff' });
+        t.textContent = String(i + 1); gm.appendChild(t);
       });
     }
+    S.gDone = el('g', {}); S.gHint = el('g', {}); S.gUser = el('g', {}); S.gAnim = el('g', {});
+    [S.gDone, S.gHint, S.gUser, S.gAnim].forEach(function (g) { svg.appendChild(g); });
+    S.help.innerHTML = S.mode === 'trace'
+      ? 'グレーの文字を、なぞってください。<small>Trace the gray letter.</small>'
+      : 'グレーの文字を、書き順どおりに、1画ずつ書いてください。<small>Write the gray letter one stroke at a time, in the right order.</small>';
     setMsg(S, '', '');
-    if (S.mode === 'trace') {
-      setMsg(S, 'お手本をなぞって書きましょう。', 'Trace the gray strokes.');
-    } else {
-      setMsg(S, '1画目から、じゅんばんに書きましょう。', 'Write the strokes one by one, in order.');
-    }
     renderButtons(S);
   }
 
@@ -129,157 +145,164 @@
   function renderButtons(S) {
     var h = '';
     if (S.mode === 'trace') {
-      h += BTN('c-gray', 'rotate', '消す', 'Clear', 'data-act="clear"');
+      h += BTN('c-gray', 'x', '消す', 'Clear', 'data-act="clear"');
       h += BTN('c-red', 'play', '書き順を見る', 'Watch', 'data-act="watch"');
-    } else if (S.done) {
-      h += BTN('c-gray', 'rotate', 'もう一度書く', 'Again', 'data-act="again"');
     } else {
-      h += BTN('c-gray', 'rotate', 'もう一度書く', 'Start over', 'data-act="again"');
-      h += BTN('c-orange', 'arrow-left', 'スキップ', 'Skip', 'data-act="skip"');
+      h += BTN('c-gray', 'rotate', 'もう一度書く', 'Try again', 'data-act="again"');
     }
-    var nx = nextKanji(S.k);
-    if (nx !== null) h += BTN('c-green solid', 'arrow-left', '次の漢字', 'Next', 'data-act="next" class-flip' + (nx === false ? ' disabled' : ''));
+    var pos = listPos(S.k);
+    // 「次の漢字」：なぞるはいつでも、れんしゅうは書き終わったあと。いまの検索結果にない漢字では出さない。
+    if (pos && (S.mode === 'trace' || S.done)) h += BTN('c-green solid', 'arrow-left', '次の漢字', 'Next', 'data-act="next"');
     S.btns.innerHTML = h;
-    S.btns.querySelectorAll('[class-flip]').forEach(function (b) { b.removeAttribute('class-flip'); b.querySelector('.ic').style.transform = 'scaleX(-1)'; });
-    var sk = S.btns.querySelector('[data-act="skip"]'); if (sk) sk.querySelector('.ic').style.transform = 'scaleX(-1)';
+    var nx = S.btns.querySelector('[data-act="next"]');
+    if (nx) nx.querySelector('.ic').style.transform = 'scaleX(-1)';
     var on = function (a, f) { var b = S.btns.querySelector('[data-act="' + a + '"]'); if (b) b.onclick = f; };
-    on('clear', function () { reset(S); });
+    on('clear', function () { while (S.gUser.firstChild) S.gUser.removeChild(S.gUser.firstChild); });
     on('again', function () { reset(S); });
     on('watch', function () { watch(S); });
-    on('skip', function () { skip(S); });
-    on('next', function () {
-      var n = nextKanji(S.k); if (!n) return;
-      var wn = S.where, md = S.mode;
-      unmount();
-      if (wn === 'modal') openModal(n); else openFullscreen(n);
-      mount(wn, n, md);
-    });
+    on('next', function () { goNext(S); });
   }
 
-  /* ---------- 書き順を見る（なぞるモード。アニメーションは app.js の playAnimation をそのまま使う） ---------- */
+  function goNext(S) {
+    var pos = listPos(S.k);
+    if (!pos) return;
+    if (pos.index + 1 >= pos.total) { showFinished(S); return; }
+    var n = pos.list[pos.index + 1], from = S.from, md = S.mode;
+    unmount();
+    if (from === 'modal') openModal(n); else openFullscreen(n);
+    mount(n, from, md);
+  }
+
+  function showFinished(S) {
+    S.finished = true;
+    S.box.style.display = 'none';
+    S.help.innerHTML = '';
+    S.msg.className = 'kj-prac-msg';
+    S.msg.innerHTML = '<div class="kj-prac-finish"><div class="big">おわりました！</div><div class="en">Finished!</div></div>';
+    S.btns.innerHTML = BTN('c-gray', 'rotate', 'もう一度', 'Again', 'data-act="restart"') + BTN('c-green solid', 'arrow-left', 'もどる', 'Back', 'data-act="back2"');
+    S.btns.querySelector('[data-act="back2"] .ic').style.transform = '';
+    S.btns.querySelector('[data-act="back2"]').onclick = unmount;
+    S.btns.querySelector('[data-act="restart"]').onclick = function () {
+      var pos = listPos(S.k), first = pos && pos.list[0], from = S.from, md = S.mode;
+      if (!first) { reset(S); return; }
+      unmount();
+      if (from === 'modal') openModal(first); else openFullscreen(first);
+      mount(first, from, md);
+    };
+  }
+
+  /* ---------- 書き順を見る（アニメーションは app.js の playAnimation をそのまま使う） ---------- */
   function watch(S) {
     if (S.animating) return;
     S.animating = true;
     while (S.gAnim.firstChild) S.gAnim.removeChild(S.gAnim.firstChild);
     var els = S.k.strokes.map(function (d) {
-      var p = el('path', { d: d, fill: 'none', stroke: '#DC2626', 'stroke-width': 5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
+      var p = el('path', { d: d, fill: 'none', stroke: COL.accentDark, 'stroke-width': 5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
       S.gAnim.appendChild(p); return p;
     });
     if (typeof currentAnimSpeed !== 'undefined') currentAnimSpeed = 700;
     playAnimation(els);
-    var t = setTimeout(function () {
+    S.timers.push(setTimeout(function () {
       S.animating = false;
       while (S.gAnim.firstChild) S.gAnim.removeChild(S.gAnim.firstChild);
-    }, S.k.strokes.length * 700 + 900);
-    S.timers.push(t);
+    }, S.k.strokes.length * 700 + 900));
   }
 
-  /* ---------- れんしゅうモード ---------- */
-  function drawModel(S, g, idx, color, width, opacity) {
+  /* ---------- れんしゅう ---------- */
+  function drawModel(g, S, idx, color, width, opacity) {
     g.appendChild(el('path', { d: S.k.strokes[idx], fill: 'none', stroke: color, 'stroke-width': width, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', opacity: opacity || 1 }));
   }
   function showHint(S) {
     while (S.gHint.firstChild) S.gHint.removeChild(S.gHint.firstChild);
     if (S.accepted >= S.polys.length) return;
-    drawModel(S, S.gHint, S.accepted, COL.hint, 6, 0.7);
+    drawModel(S.gHint, S, S.accepted, COL.hint, 6, 0.7);
     var st = S.polys[S.accepted][0];
     S.gHint.appendChild(el('circle', { cx: st[0], cy: st[1], r: 4.5, fill: COL.hint }));
   }
-  function clearHint(S) { while (S.gHint.firstChild) S.gHint.removeChild(S.gHint.firstChild); }
-
   function accept(S) {
-    drawModel(S, S.gDone, S.accepted, COL.ink, 5, 1);
+    drawModel(S.gDone, S, S.accepted, COL.accentDark, 5, 1);
     S.accepted++;
-    clearHint(S);
+    while (S.gHint.firstChild) S.gHint.removeChild(S.gHint.firstChild);
+    setMsg(S, '', '');
     if (S.accepted >= S.polys.length) {
       S.done = true;
-      if (S.mistakes === 0) setMsg(S, '正解です！', 'Correct!', 'good');
-      else setMsg(S, '最後まで書けました。でも、まちがいがありました。', 'You finished, but there were mistakes.', 'good');
+      if (S.mistakes === 0) { setMsg(S, '正解です！', 'Well done!', 'good'); play('ok'); }
+      else setMsg(S, '最後まで書けました。でも、まちがいがありました。', 'You finished, but you made a mistake. Try again.', 'bad');
       renderButtons(S);
-    } else {
-      setMsg(S, (S.accepted + 1) + '画目を書きましょう。', 'Write stroke ' + (S.accepted + 1) + '.');
     }
-  }
-
-  function skip(S) {
-    if (S.done || S.mode !== 'practice') return;
-    S.mistakes++;
-    accept(S);
-    if (!S.done) setMsg(S, (S.accepted + 1) + '画目を書きましょう。', 'Write stroke ' + (S.accepted + 1) + '.');
   }
 
   function finishStroke(S, pts, pathEl) {
-    if (S.mode === 'trace') {
-      // 判定しない。書いた線は残す。点は小さな丸にする。
+    if (S.mode === 'trace') {                 // 判定しない。書いた線は残す。点は小さな丸
       if (StrokeOrder.polylineLength(pts) < 3) {
         pathEl.remove();
-        var c = pts[0];
-        S.gUser.appendChild(el('circle', { cx: c[0], cy: c[1], r: 2.6, fill: COL.ink }));
+        S.gUser.appendChild(el('circle', { cx: pts[0][0], cy: pts[0][1], r: 2.5, fill: COL.accentDark }));
+      } else {
+        pathEl.setAttribute('stroke', COL.accentDark);
       }
       return;
     }
-    // れんしゅう
-    var wasRealTouch = StrokeOrder.polylineLength(pts) >= 3;
-    var nextLen = StrokeOrder.polylineLength(S.polys[S.accepted]);
-    if (!wasRealTouch && nextLen >= StrokeOrder.JUDGE.dotLength) { pathEl.remove(); return; } // うっかり触れただけ：数えない
+    // 触っただけ（次の画が点ではないとき）は、まちがいに数えない
+    if (StrokeOrder.polylineLength(pts) < 3 && StrokeOrder.polylineLength(S.polys[S.accepted]) >= StrokeOrder.JUDGE.dotLength) { pathEl.remove(); return; }
     var result = StrokeOrder.judgeStroke(pts, S.polys, S.accepted);
-    if (result === 'ok') {
-      pathEl.remove();
-      accept(S);
-      return;
-    }
-    // まちがい：赤い線を0.6秒だけ見せる
-    pathEl.setAttribute('stroke', COL.wrong);
-    var t = setTimeout(function () { pathEl.remove(); }, 600);
-    S.timers.push(t);
+    if (result === 'ok') { pathEl.remove(); accept(S); return; }
+    pathEl.setAttribute('stroke', COL.wrong);   // まちがい：赤い線を0.6秒だけ見せる
+    S.timers.push(setTimeout(function () { pathEl.remove(); }, 600));
     S.mistakes++;
+    play('ng');
     showHint(S);
-    if (result === 'order') setMsg(S, '書き順がちがいます', 'Wrong stroke order', 'bad');
-    else setMsg(S, '形か向きがちがいます', 'Wrong shape or direction', 'bad');
+    if (result === 'order') setMsg(S, '書き順がちがいます', 'Wrong stroke order.', 'bad');
+    else setMsg(S, '形か向きがちがいます', 'Check the shape and the direction.', 'bad');
   }
 
   /* ---------- 入力（Pointer Events） ---------- */
   function bindPointer(S) {
-    var svg = S.svg;
+    var box = S.box, svg = S.svg;
     function pos(e) {
-      var r = svg.getBoundingClientRect();
-      return [((e.clientX - r.left) / r.width) * 109, ((e.clientY - r.top) / r.height) * 109];
+      var r = box.getBoundingClientRect(), w = r.width || 1;
+      return [((e.clientX - r.left) / w) * 109, ((e.clientY - r.top) / (r.height || w)) * 109];
     }
-    function canDraw() { return !S.animating && !(S.mode === 'practice' && S.done); }
-    svg.addEventListener('pointerdown', function (e) {
+    box.addEventListener('pointerdown', function (e) {
       if (e.pointerType === 'mouse' && e.button !== 0) return;
-      if (S.drawing || !canDraw()) return;
+      if (S.drawing || S.animating || (S.mode === 'practice' && S.done) || S.finished) return;
       e.preventDefault();
-      try { svg.setPointerCapture(e.pointerId); } catch (x) { /* ignore */ }
+      try { box.setPointerCapture(e.pointerId); } catch (x) { /* 何もしない */ }
       var p = pos(e);
-      var pathEl = el('path', { d: ptsToD([p]), fill: 'none', stroke: COL.ink, 'stroke-width': 5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
+      var pathEl = el('path', { d: ptsToD([p]), fill: 'none', stroke: COL.accent, 'stroke-width': 4, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
       S.gUser.appendChild(pathEl);
       S.drawing = { id: e.pointerId, pts: [p], pathEl: pathEl };
+      if (S.mode === 'practice' && !S.done) setMsg(S, '', '');   // 次の線を書き始めたら、メッセージを消す
     });
-    svg.addEventListener('pointermove', function (e) {
+    box.addEventListener('pointermove', function (e) {
       var d = S.drawing; if (!d || e.pointerId !== d.id) return;
       var p = pos(e), last = d.pts[d.pts.length - 1];
       if (Math.abs(p[0] - last[0]) < 0.05 && Math.abs(p[1] - last[1]) < 0.05) return;
       d.pts.push(p);
-      d.pathEl.setAttribute('d', polyD(d.pts));
+      d.pathEl.setAttribute('d', ptsToD(d.pts));
     });
     function end(e, cancelled) {
       var d = S.drawing; if (!d || e.pointerId !== d.id) return;
       S.drawing = null;
-      try { svg.releasePointerCapture(e.pointerId); } catch (x) { /* ignore */ }
+      try { box.releasePointerCapture(e.pointerId); } catch (x) { /* 何もしない */ }
       if (cancelled) { d.pathEl.remove(); return; }
       finishStroke(S, d.pts, d.pathEl);
     }
-    svg.addEventListener('pointerup', function (e) { end(e, false); });
-    svg.addEventListener('pointercancel', function (e) { end(e, true); });
+    box.addEventListener('pointerup', function (e) { end(e, false); });
+    box.addEventListener('pointercancel', function (e) { end(e, true); });
   }
 
-  /* ---------- 「書き順を練習」ボタン ---------- */
+  /* ---------- 「書き順を練習」ボタン・Escキー ---------- */
   function init() {
     var bm = document.getElementById('kjPracOpen');
     var bf = document.getElementById('kjFsPracOpen');
-    if (bm) bm.addEventListener('click', function () { if (typeof currentModalKanji !== 'undefined' && currentModalKanji) mount('modal', currentModalKanji, 'trace'); });
-    if (bf) bf.addEventListener('click', function () { if (typeof fsCurrentKanji !== 'undefined' && fsCurrentKanji) mount('fs', fsCurrentKanji, 'trace'); });
+    if (bm) bm.addEventListener('click', function () { if (typeof currentModalKanji !== 'undefined' && currentModalKanji) mount(currentModalKanji, 'modal', 'trace'); });
+    if (bf) bf.addEventListener('click', function () { if (typeof fsCurrentKanji !== 'undefined' && fsCurrentKanji) mount(fsCurrentKanji, 'fs', 'trace'); });
+    // Escは、練習の画面だけを閉じる（もとの画面は残す）
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && cur) { e.stopImmediatePropagation(); unmount(); }
+    }, true);
+    // 音を先に読み込んでおく
+    ['ok', 'ng'].forEach(function (k) { try { sounds[k] = new Audio(SOUND[k]); sounds[k].preload = 'auto'; } catch (e) { /* 何もしない */ } });
   }
   init();
 
